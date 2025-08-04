@@ -7,14 +7,14 @@ It extracts specific patterns about the effects of land management practices on 
 
 The name comes from the type of the pattern it extracts:
 
-**L**: Land management practice (e.g., conventional tillage)
+**L**: Land management practice (e.g., conventional tillage)  
 **E**: Effect (e.g., increase, decrease, no effect)  
 **P**: Affected property of soil biota (e.g., diversity, abundance)  
 **A**: Soil biota actor (e.g., bacteria, fungi, nematodes)  
 **M**: Measurement method (e.g., qPCR, Shannon diversity index)  
 **T**: Temporal scope (e.g., timing after treatment)  
 **I**: Locational scope (e.g., soil depth, field site)  
-**C**: Contrasting practice (e.g. no tillage)
+**C**: Contrasting practice (e.g. no tillage) 
 
 ## How to use
 
@@ -60,3 +60,11 @@ In most cases the input will be a table exported from WOS or Scopus.
     There are two additional modes: `screen` and `score`. `screen` prescreens the input data to find out which abstracts should be considered for the long and costly extraction.
    'score' scores the abstracts according to LEPAMTIC rules.
 
+
+## Authors
+
+LEPAMTIC is developed by Vid Podpečan (vid.podpecan@ijs.si).
+
+## License
+
+MIT
