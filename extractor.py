@@ -11,9 +11,6 @@ from json import JSONDecodeError
 
 from chat_via_api import ChatDialog
 
-# from importlib import reload
-# reload(lepamtic)
-
 
 def get_LLM(model_name, args):
     role = 'You act as a data scientist specialized in text mining. Your research domain is soil health, soil biology and land management practices.'
