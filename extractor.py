@@ -15,27 +15,36 @@ from chat_via_api import ChatDialog
 # reload(lepamtic)
 
 
-def get_LLM(model_name):
+def get_LLM(model_name, args):
     role = 'You act as a data scientist specialized in text mining. Your research domain is soil health, soil biology and land management practices.'
 
     if 'gpt' in model_name or 'o3' in model_name or 'o4' in model_name or 'o1' in model_name:
-        llm = ChatDialog(api_key=open('openai_api_key').read().strip(),
+        if not args.openai_keyfile:
+            raise ValueError(f'{model_name} needs the "--openai_keyfile" parameter to be set')
+
+        llm = ChatDialog(api_key=open(args.openai_keyfile).read().strip(),
                         organization='org-ZrgvzvWlbLIRYMeUAOrVk3am',  # this is optional
                         model=model_name,
                         role=role,
                         call_wait_time=1,
                         reset_for_each_call=False)
+    
     elif 'gemini' in model_name:
-        llm = ChatDialog(api_key=open('google_api_key').read().strip(),
+        if not args.openai_keyfile:
+            raise ValueError(f'{model_name} needs the "--google_keyfile" parameter to be set')
+
+        llm = ChatDialog(api_key=open(args.google_keyfile).read().strip(),
                         base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
                         model=model_name,
                         role=role,
                         call_wait_time=15,
                         reset_for_each_call=False)    
+    
     else:
-        llm = ChatDialog(base_url="http://tornado.ijs.si:11434/v1",
+        raise ValueError('Please set the parameters of the local LLM in the code')
+        llm = ChatDialog(base_url="",
                         api_key = "ollama",
-                        model=model_name, #'gemma3:27b',
+                        model=model_name,
                         role=role,
                         call_wait_time=1,
                         reset_for_each_call=False)
@@ -85,6 +94,8 @@ if __name__ == '__main__':
         subparser.add_argument('--temperature', type=float, required=False, default=0, help='LLM temperature parameter (read LLM docs for more info)')
         subparser.add_argument('--reasoning_effort', type=str, required=False, choices=['low','medium','high'], default='medium', help='The reasoning_effort parameter (OpenAI reasoning models only)')
         subparser.add_argument('--n_repeats', type=int, required=False, default=10, help="Number of retries if the model's output is invalid")
+        subparser.add_argument('--openai_keyfile', type=str, required=False, help="A file containing OpenAI API key")
+        subparser.add_argument('--google_keyfile', type=str, required=False, help="A file containing Google API key")
 
     parser = argparse.ArgumentParser(description='Run LLM processing on CSV input.')
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Select a mode to run")
@@ -119,7 +130,7 @@ if __name__ == '__main__':
 
 
     if args.mode == 'screen':
-        llm = get_LLM(args.model_name)
+        llm = get_LLM(args.model_name, args)
 
         original_data = read_data(args.input_file)
         data = original_data[['DOI', 'Abstract']].copy()
@@ -162,7 +173,7 @@ if __name__ == '__main__':
             errors_df.to_excel(os.path.join(args.output_dir, f"{ifnb}__errors.csv"), index=False)
 
     elif args.mode == 'score':
-        scoring_llm = get_LLM(args.scoring_model_name)
+        scoring_llm = get_LLM(args.scoring_model_name, args)
 
         original_data = read_data(args.input_file)
         data = original_data[['DOI', 'Abstract']].copy()
@@ -211,8 +222,8 @@ if __name__ == '__main__':
         ##################
         # The main part is here instead of in a function for easy debugging
 
-        llm = get_LLM(args.model_name)
-        scoring_llm = get_LLM(args.scoring_model_name)
+        llm = get_LLM(args.model_name, args)
+        scoring_llm = get_LLM(args.scoring_model_name, args)
 
         unified_actors = pd.read_csv(args.actor_file, header=None)[0].to_list()
 

@@ -1,2 +1,3 @@
 openai==1.98.*
 pandas==2.3.*
+openpyxl==3.1.*
