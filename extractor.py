@@ -154,20 +154,22 @@ if __name__ == '__main__':
                 store_error(error_data)                
                 print(f'Error while screening {doi}')
                 continue
-        
-        results_df = pd.DataFrame(results).set_index('DOI')
-        original_data = original_data.set_index('DOI')
-        output_df = original_data.merge(results_df, how='left', left_index=True, right_index=True)
-        output_df = output_df.reset_index()
-        
-        ifn = os.path.split(args.input_file)[1]
-        ifnb, ifnext = os.path.splitext(ifn)
-        output_df[output_df['abstract_relevance']==1].to_csv(os.path.join(args.output_dir, f"{ifnb}__relevance_1.csv"), index=False)
-        output_df[output_df['abstract_relevance']==0].to_csv(os.path.join(args.output_dir, f"{ifnb}__relevance_0.csv"), index=False)    
 
-        errors_df = pd.DataFrame(error_data)
-        if len(errors_df):
-            errors_df.to_excel(os.path.join(args.output_dir, f"{ifnb}__errors.csv"), index=False)
+            # write every results into output files
+            results_df = pd.DataFrame(results).set_index('DOI')
+            merged_data = original_data.set_index('DOI')
+            output_df = merged_data.merge(results_df, how='left', left_index=True, right_index=True)
+            output_df = output_df.reset_index()
+            
+            ifn = os.path.split(args.input_file)[1]
+            ifnb, ifnext = os.path.splitext(ifn)
+            output_df[output_df['abstract_relevance']==1].to_csv(os.path.join(args.output_dir, f"{ifnb}__relevance_1.csv"), index=False)
+            output_df[output_df['abstract_relevance']==0].to_csv(os.path.join(args.output_dir, f"{ifnb}__relevance_0.csv"), index=False)    
+
+            errors_df = pd.DataFrame(error_data)
+            if len(errors_df):
+                errors_df.to_excel(os.path.join(args.output_dir, f"{ifnb}__errors.csv"), index=False)
+        print('Prescreening complete.')
 
     elif args.mode == 'score':
         scoring_llm = get_LLM(args.scoring_model_name, args)
@@ -198,18 +200,20 @@ if __name__ == '__main__':
                 print(f'Error while scoring {doi}')
                 continue
         
-        results_df = pd.DataFrame(results).set_index('DOI')
-        original_data = original_data.set_index('DOI')
-        output_df = original_data.merge(results_df, how='left', left_index=True, right_index=True)
-        output_df = output_df.reset_index()
-        
-        ifn = os.path.split(args.input_file)[1]
-        ifnb, ifnext = os.path.splitext(ifn)
-        output_df.to_csv(os.path.join(args.output_dir, f"{ifnb}__scored.csv"), index=False)
+            # write every results into output files
+            results_df = pd.DataFrame(results).set_index('DOI')
+            merged_data = original_data.set_index('DOI')
+            output_df = merged_data.merge(results_df, how='left', left_index=True, right_index=True)
+            output_df = output_df.reset_index()
+            
+            ifn = os.path.split(args.input_file)[1]
+            ifnb, ifnext = os.path.splitext(ifn)
+            output_df.to_csv(os.path.join(args.output_dir, f"{ifnb}__scored.csv"), index=False)
 
-        errors_df = pd.DataFrame(error_data)
-        if len(errors_df):
-            errors_df.to_excel(os.path.join(args.output_dir, f"{ifnb}__errors.csv"), index=False)
+            errors_df = pd.DataFrame(error_data)
+            if len(errors_df):
+                errors_df.to_excel(os.path.join(args.output_dir, f"{ifnb}__errors.csv"), index=False)
+        print('Scoring complete.')
 
     else: # args.mode == 'extract':
         if not os.path.isfile(args.actor_file):
@@ -302,22 +306,22 @@ if __name__ == '__main__':
             result_dfs.append(patterns_df)
 
 
-        if result_dfs:
-            columns = set(result_dfs[0].columns)
-            for df in result_dfs[1:]:
-                if set(df.columns) != columns:
-                    print('ERROR: columns do not match across all extraction results! NaNs will be present after concatenation.')
+            # write every results into output files
+            if result_dfs:
+                columns = set(result_dfs[0].columns)
+                for df in result_dfs[1:]:
+                    if set(df.columns) != columns:
+                        print('ERROR: columns do not match across all extraction results! NaNs will be present after concatenation.')
 
+            patterns_df = pd.concat(result_dfs, ignore_index=True)
+            errors_df = pd.DataFrame(error_data)
 
-        patterns_df = pd.concat(result_dfs, ignore_index=True)
-        errors_df = pd.DataFrame(error_data)
+            ##################
 
-        ##################
+            base_fn = f"{args.model_name}__{datetime.now().strftime('%Y-%b-%d_%H-%M-%S')}.xlsx"
+            # patterns_df, errors_df = extract_patterns(args)
+            patterns_df.to_excel(os.path.join(args.output_dir, f'patterns__{base_fn}'), index=False)
+            if len(errors_df):
+                errors_df.to_excel(os.path.join(args.output_dir, f'errors__{base_fn}'), index=False)
 
-        base_fn = f"{args.model_name}__{datetime.now().strftime('%Y-%b-%d_%H-%M-%S')}.xlsx"
-        # patterns_df, errors_df = extract_patterns(args)
-        patterns_df.to_excel(os.path.join(args.output_dir, f'patterns__{base_fn}'), index=False)
-        if len(errors_df):
-            errors_df.to_excel(os.path.join(args.output_dir, f'errors__{base_fn}'), index=False)
-
-        print('Finished.')
+        print('Extraction complete.')
