@@ -25,7 +25,7 @@ You need Python 3.9+ and packages listed in `requirements.txt`.
 
 #### LLM
 You can use OpenAI API, Google API or local models (ollama). When using OpenAI or Google API, save the API key into a file which will be read by the extractor. 
-When using local models, set the `base_url` parameter which points to your local server hosting the modell.
+When using local models, set the `base_url` parameter which points to your local server hosting the model.
 
 #### Input data
 The extractor accepts `.csv` and `.xlsx` files with at least two columns: primary key and abstract.
