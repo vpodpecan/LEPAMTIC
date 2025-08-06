@@ -8,6 +8,7 @@ from datetime import datetime
 
 import traceback
 from json import JSONDecodeError
+from tqdm import tqdm
 
 from chat_via_api import ChatDialog
 
@@ -38,8 +39,9 @@ def get_LLM(model_name, args):
                         reset_for_each_call=False)    
     
     else:
-        raise ValueError('Please set the parameters of the local LLM in the code')
-        llm = ChatDialog(base_url="",
+        if not args.base_url:
+            raise ValueError('Local ollama model requires the --base_url parameter')
+        llm = ChatDialog(base_url=args.base_url,
                         api_key = "ollama",
                         model=model_name,
                         role=role,
@@ -58,41 +60,50 @@ def read_data(fname):
 
     orig_len = len(df)
 
-    if 'Abstract' not in df.columns:
-        raise SyntaxError('"Abstract" column not present')
-    if 'DOI' not in df.columns:
-        raise SyntaxError('"DOI" column not present')
+    ACOL = args.abstract_column
+    PKEY = args.primary_key
+
+    if ACOL not in df.columns:
+        raise SyntaxError(f'Abstract column "{ACOL}" not present')
+    if PKEY not in df.columns:
+        raise SyntaxError(f'Primary key column "{PKEY}" not present')
 
     # exclude empty abstracts
-    df = df[(df['Abstract'].notna()) & (df['Abstract']!='')]
+    df = df[(df[ACOL].notna()) & (df[ACOL]!='')]
 
     if (nempty := orig_len - len(df)) > 0:
         print(f'Warning: {nempty} empty abstract(s) ignored!')
 
-    # fill missing DOIs
-    mask = (df['DOI'] == '') | (df['DOI'].isna())
-    df.loc[mask, 'DOI'] = [f'missing_DOI_{i+1}' for i in range(mask.sum())]
-    if (miss := sum(mask)) > 0:
-        print(f'Warning: {miss} missing DOIs filled in!')
+    # check primary key column
+    if df[PKEY].replace('', pd.NA).isna().any():
+        raise SyntaxError(f'Primary key column "{PKEY}" contains empty cells')
+    if not df[PKEY].is_unique:
+        raise SyntaxError(f'Primary key column "{PKEY}" contains duplicates')
+   
     return df
 
 
-def store_error(error_data):
-    error_text = traceback.format_exc()
-    error_data.append({'DOI': doi, 'error': error_text})
 
 
 if __name__ == '__main__':
 
+    def store_error(error_data):
+        # error_text = traceback.format_exc()
+        error_data.append({PKEY: pk}) #, 'error': error_text})
+
+
     def add_common_args(subparser):
         subparser.add_argument('--output_dir', type=str, required=True, help='Directory to store output files')
         subparser.add_argument('--input_file', type=str, required=True, help='Path to the input CSV file')
+        subparser.add_argument('--primary_key', type=str, required=True, help='Unique column to serve as primary key')
+        subparser.add_argument('--abstract_column', type=str, required=True, help='Name of the column containing abstract')
         subparser.add_argument('--seed', type=int, required=False, default=42, help='LLM seed parameter (read LLM docs for more info)')
         subparser.add_argument('--temperature', type=float, required=False, default=0, help='LLM temperature parameter (read LLM docs for more info)')
         subparser.add_argument('--reasoning_effort', type=str, required=False, choices=['low','medium','high'], default='medium', help='The reasoning_effort parameter (OpenAI reasoning models only)')
         subparser.add_argument('--n_repeats', type=int, required=False, default=10, help="Number of retries if the model's output is invalid")
         subparser.add_argument('--openai_keyfile', type=str, required=False, help="A file containing OpenAI API key")
         subparser.add_argument('--google_keyfile', type=str, required=False, help="A file containing Google API key")
+        subparser.add_argument('--base_url', type=str, required=False, help="URL of the local LLM")
 
     parser = argparse.ArgumentParser(description='Run LLM processing on CSV input.')
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Select a mode to run")
@@ -125,20 +136,22 @@ if __name__ == '__main__':
         print(f"Error: Output directory '{args.output_dir}' does not exist.", file=sys.stderr)
         sys.exit(1)
 
+    PKEY = args.primary_key
+    ACOL = args.abstract_column
 
     if args.mode == 'screen':
         llm = get_LLM(args.model_name, args)
 
         original_data = read_data(args.input_file)
-        data = original_data[['DOI', 'Abstract']].copy()
-        data['DOI'] = data['DOI'].str.lower()
-        data = data.set_index('DOI')
+        data = original_data[[PKEY, ACOL]].copy()
+        data = data.set_index(PKEY)
 
         error_data = []
         results = []
 
-        for doi, row in data.iterrows():
-            abstract = row['Abstract']
+        # for pk, row in data.iterrows():
+        for pk, row in tqdm(data.iterrows(), total=len(data)):            
+            abstract = row[ACOL]
             # try n_repeats fimes to get over some erratic one-time-only behaviour of LLMs
             for cnt in range(args.n_repeats):
                 try:
@@ -148,16 +161,16 @@ if __name__ == '__main__':
                     print(e)
                     print(f'Error, attempt {cnt+1} of {args.n_repeats}')
                 else:
-                    results.append({'DOI': doi, 'abstract_relevance': score['relevance'], 'abstract_relevance_explanation': score['comment']})
+                    results.append({PKEY: pk, 'abstract_relevance': score['relevance'], 'abstract_relevance_explanation': score['comment']})
                     break
             else:
                 store_error(error_data)                
-                print(f'Error while screening {doi}')
+                print(f'Error while screening {pk}')
                 continue
 
             # write every results into output files
-            results_df = pd.DataFrame(results).set_index('DOI')
-            merged_data = original_data.set_index('DOI')
+            results_df = pd.DataFrame(results).set_index(PKEY)
+            merged_data = original_data.set_index(PKEY)
             output_df = merged_data.merge(results_df, how='left', left_index=True, right_index=True)
             output_df = output_df.reset_index()
             
@@ -175,15 +188,15 @@ if __name__ == '__main__':
         scoring_llm = get_LLM(args.scoring_model_name, args)
 
         original_data = read_data(args.input_file)
-        data = original_data[['DOI', 'Abstract']].copy()
-        data['DOI'] = data['DOI'].str.lower()
-        data = data.set_index('DOI')
+        data = original_data[[PKEY, ACOL]].copy()
+        data = data.set_index(PKEY)
 
         error_data = []
         results = []
 
-        for doi, row in data.iterrows():
-            abstract = row['Abstract']
+        # for pk, row in data.iterrows():
+        for pk, row in tqdm(data.iterrows(), total=len(data)):
+            abstract = row[ACOL]
             # try n_repeats fimes to get over some erratic one-time-only behaviour of LLMs
             for cnt in range(args.n_repeats):
                 try:
@@ -193,16 +206,16 @@ if __name__ == '__main__':
                     print(e)
                     print(f'Error, attempt {cnt+1} of {args.n_repeats}')
                 else:
-                    results.append({'DOI': doi, 'abstract_score': score['score'], 'abstract_score_explanation': score['score_explanation']})
+                    results.append({PKEY: pk, 'abstract_score': score['score'], 'abstract_score_explanation': score['score_explanation']})
                     break
             else:
                 store_error(error_data)                
-                print(f'Error while scoring {doi}')
+                print(f'Error while scoring {pk}')
                 continue
         
             # write every results into output files
-            results_df = pd.DataFrame(results).set_index('DOI')
-            merged_data = original_data.set_index('DOI')
+            results_df = pd.DataFrame(results).set_index(PKEY)
+            merged_data = original_data.set_index(PKEY)
             output_df = merged_data.merge(results_df, how='left', left_index=True, right_index=True)
             output_df = output_df.reset_index()
             
@@ -220,6 +233,17 @@ if __name__ == '__main__':
             print(f"Error: Actor file '{args.actor_file}' does not exist.", file=sys.stderr)
             sys.exit(1)
 
+        # check output files
+        ifp, ifn = os.path.split(args.input_file)
+        ifnb, ifnext = os.path.splitext(ifn)
+        output_fn = os.path.join(args.output_dir, f'{ifnb}__patterns__{args.model_name}__{args.scoring_model_name}.xlsx')
+        err_fn = os.path.join(args.output_dir, f'{ifnb}__errors__{args.model_name}__{args.scoring_model_name}.xlsx')
+
+        if os.path.exists(output_fn):
+            raise FileExistsError(f'Output file "{output_fn}" already exists')
+        if os.path.exists(err_fn):
+            raise FileExistsError(f'Error file "{err_fn}" already exists')
+
         ##################
         # The main part is here instead of in a function for easy debugging
 
@@ -229,14 +253,15 @@ if __name__ == '__main__':
         unified_actors = pd.read_csv(args.actor_file, header=None)[0].to_list()
 
         data = read_data(args.input_file)
-        data = data[['DOI', 'Abstract']].copy()
-        data['DOI'] = data['DOI'].str.lower()
-        data = data.set_index('DOI')
+        data = data[[PKEY, ACOL]].copy()
+        data = data.set_index(PKEY)
 
         error_data = []
         result_dfs = []
-        for doi, row in data.iterrows():
-            abstract = row['Abstract']
+        # for pk, row in data.iterrows():
+        for pk, row in tqdm(data.iterrows(), total=len(data)):
+
+            abstract = row[ACOL]
 
             # try every step n_repeats fimes to get over some erratic one-time-only behaviour of LLMs
             for cnt in range(args.n_repeats):
@@ -250,7 +275,7 @@ if __name__ == '__main__':
                     break
             else:
                 store_error(error_data)                
-                print(f'Error while scoring {doi}')
+                print(f'Error while scoring {pk}')
                 continue
 
 
@@ -258,7 +283,7 @@ if __name__ == '__main__':
                 try:
                     llm.reset()
                     patterns_df = pd.DataFrame(lepamtic.extract_patterns(llm, abstract, seed=args.seed, temperature=args.temperature))
-                    patterns_df.insert(0, 'DOI', doi)
+                    patterns_df.insert(0, PKEY, pk)
                 except JSONDecodeError as e:
                     print(e)
                     print(f'Error, attempt {cnt+1} of {args.n_repeats}')
@@ -266,7 +291,7 @@ if __name__ == '__main__':
                     break
             else:
                 store_error(error_data)                
-                print(f'Error while finding patterns for {doi}')
+                print(f'Error while finding patterns for {pk}')
                 continue
 
 
@@ -282,7 +307,7 @@ if __name__ == '__main__':
                     break
             else:
                 store_error(error_data)                
-                print(f'Error while unifying actors for {doi}')
+                print(f'Error while unifying actors for {pk}')
                 continue
 
 
@@ -298,7 +323,7 @@ if __name__ == '__main__':
                     break
             else:
                 store_error(error_data)                
-                print(f'Error while unifying property for {doi}')
+                print(f'Error while unifying property for {pk}')
                 continue
 
             patterns_df.insert(len(patterns_df.columns), 'score', score['score'])
@@ -316,12 +341,13 @@ if __name__ == '__main__':
             patterns_df = pd.concat(result_dfs, ignore_index=True)
             errors_df = pd.DataFrame(error_data)
 
-            ##################
-
-            base_fn = f"{args.model_name}__{datetime.now().strftime('%Y-%b-%d_%H-%M-%S')}.xlsx"
-            # patterns_df, errors_df = extract_patterns(args)
-            patterns_df.to_excel(os.path.join(args.output_dir, f'patterns__{base_fn}'), index=False)
+            patterns_df.to_excel(output_fn, index=False)
             if len(errors_df):
-                errors_df.to_excel(os.path.join(args.output_dir, f'errors__{base_fn}'), index=False)
+                errors_df.to_excel(err_fn, index=False)
+
+        # if there were only errors nothing was written so let's do it again
+        errors_df = pd.DataFrame(error_data)
+        if len(errors_df):
+            errors_df.to_excel(err_fn, index=False)
 
         print('Extraction complete.')
