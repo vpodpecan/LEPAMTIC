@@ -25,12 +25,12 @@ You need Python 3.9+ and packages listed in `requirements.txt`.
 
 #### LLM
 You can use OpenAI API, Google API or local models (ollama). When using OpenAI or Google API, save the API key into a file which will be read by the extractor. 
-When using local models, set the `base_url` in the script to point to your local server hosting the model
+When using local models, set the `base_url` parameter which points to your local server hosting the modell.
 
 #### Input data
-The extractor accepts `.csv` and `.xlsx` files with at least `Abstract` and `DOI` columns. 
-`DOI` serves as an identifier, it can be incomplete in which case the missing values will be filled out with unique strings.
-In most cases the input will be a table exported from WOS or Scopus.
+The extractor accepts `.csv` and `.xlsx` files with at least two columns: primary key and abstract.
+The primary key column must be unique and nonempty for all rows, e.g., DOI, Pubmed ID, Accession Number, etc.
+In most cases the input data is a table exported from WOS or Scopus.
 
 
 #### Preparing the environment
@@ -55,7 +55,7 @@ In most cases the input will be a table exported from WOS or Scopus.
     ```
 3. Run the extractor
     ```bash
-    python3 extractor.py extract --model_name gpt-4o --scoring_model_name o3 --actor_file data/LLM_actors_list_V2.csv --input_file my_data.csv --output_dir results --openai_keyfile api_keys/openai_api_key
+    python3 extractor.py extract --model_name gpt-4o --scoring_model_name o3 --actor_file data/LLM_actors_list_V2.csv --input_file my_data.csv --output_dir results --openai_keyfile api_keys/openai_api_key --primary_key "UT (Unique ID)" --abstract_column "Abstract"
     ```
     There are two additional modes: `screen` and `score`. `screen` prescreens the input data to find out which abstracts should be considered for the long and costly extraction.
    `score` scores the abstracts according to LEPAMTIC rules.
