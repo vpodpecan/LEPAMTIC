@@ -55,7 +55,7 @@ In most cases the input data is a table exported from WOS or Scopus.
     ```
 3. Run the extractor
     ```bash
-    python3 extractor.py extract --model_name gpt-4o --scoring_model_name o3 --actor_file data/LLM_actors_list_V2.csv --input_file my_data.csv --output_dir results --openai_keyfile api_keys/openai_api_key --primary_key "UT (Unique ID)" --abstract_column "Abstract"
+    python3 extractor.py extract --model_name gpt-4o --scoring_model_name o3 --actor_file data/LLM_actors_list_V2.csv --input_file data/sample.xlsx --output_dir results --openai_keyfile api_keys/openai_api_key --primary_key "UT (Unique ID)" --abstract_column "Abstract"
     ```
     There are two additional modes: `screen` and `score`. `screen` prescreens the input data to find out which abstracts should be considered for the long and costly extraction.
    `score` scores the abstracts according to LEPAMTIC rules.
