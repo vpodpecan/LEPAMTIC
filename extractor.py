@@ -298,7 +298,8 @@ if __name__ == '__main__':
             for cnt in range(args.n_repeats):
                 try:
                     llm.reset()
-                    uactors_df = pd.DataFrame(lepamtic.unify_actors(llm, patterns_df['actor'].to_list(), unified_actors, seed=args.seed, temperature=args.temperature))
+                    actor_sentence_dicts = patterns_df[['actor', 'sentences']].to_dict(orient="records")
+                    uactors_df = pd.DataFrame(lepamtic.unify_actors(llm, actor_sentence_dicts, unified_actors, seed=args.seed, temperature=args.temperature))
                     patterns_df.insert(7, 'actor_unified', uactors_df['actor_unified'])
                 except JSONDecodeError as e:
                     print(e)
@@ -314,7 +315,8 @@ if __name__ == '__main__':
             for cnt in range(args.n_repeats):
                 try:
                     llm.reset()
-                    uproperties_df = pd.DataFrame(lepamtic.unify_property(llm, patterns_df['property'].to_list(), lepamtic.unified_properties, seed=args.seed, temperature=args.temperature))
+                    property_sentence_dicts = patterns_df[['property', 'sentences']].to_dict(orient="records")
+                    uproperties_df = pd.DataFrame(lepamtic.unify_property(llm, property_sentence_dicts, lepamtic.unified_properties, seed=args.seed, temperature=args.temperature))
                     patterns_df.insert(6, 'property_unified', uproperties_df['property_unified'])
                 except JSONDecodeError as e:
                     print(e)

@@ -283,19 +283,22 @@ The object must contain:
     return parse_JSONL(answer, required_fields=['score', 'score_explanation'])
 
 
-def unify_actors(llm, original_actors_list, unified_actors_list, **kwargs):
+def unify_actors(llm, actor_sentence_dicts, unified_actors_list, **kwargs):
     prompt = f'''Map soil biota actors to standardized names using the following guidelines:
 
 1. Input Format
-    - "Extracted actors": A Python-style list of extracted names.
+    - "Extracted items": A Python-style list of dictionaries, where each dictionary has the keys:
+        - "actor": the extracted actor string
+        - "sentence": the full sentence from which the actor was extracted
     - "Unified categories": A Python-style list of standardized soil biota categories.
 
 2. Task
-    - For each actor in "Extracted actors", identify the closest matching category from "Unified categories" using generalization and common sense.
-    - If no suitable match exists, assign "NA" as the actor_unified value.
+    - For each item in "Extracted items", identify the closest matching category from "Unified categories" using generalization, common sense, and the sentence context of the actor.
+    - If the actor refers to an enzyme, always unify as "Soil microbiome".
+    - If no suitable match exists, assign "NA".
 
 3. Output
-Return the result in JSONL format. For each actor, output one line as a valid JSON object with the following fields:
+Return the result in JSONL format. For each item, output one line as a valid JSON object with the following fields:
     - "actor": the original extracted name
     - "actor_unified": the standardized matched category from the unified list, or "NA"
 
@@ -306,7 +309,7 @@ Return the result in JSONL format. For each actor, output one line as a valid JS
 
 5. Input Data
 
-Extracted actors: {original_actors_list}
+Extracted items: {actor_sentence_dicts}
 
 Unified categories: {unified_actors_list}
 '''
@@ -315,15 +318,17 @@ Unified categories: {unified_actors_list}
     return parse_JSONL(answer, required_fields=['actor', 'actor_unified'])
 
 
-def unify_property(llm, original_property_list, unified_property_list, **kwargs):
+def unify_property(llm, property_sentence_dicts, unified_property_list, **kwargs):
     prompt = f'''Unify the names of soil biota properties that were reported to be affected by land management practices in scientific publications.
 
 1. Input Format
-    - "Extracted properties": A Python-style list of property names.
+    - "Extracted items": A Python-style list of dictionaries, where each dictionary has the keys:
+        - "property": the extracted property name
+        - "sentence": the full sentence from which the property was extracted
     - "Unified categories": A Python-style reference list of standardized property names used for unification.
 
 2. Task
-    - For each item in "Extracted properties", find the most appropriate match from "Unified categories" using generalization and common sense.
+    - For each item in "Extracted items", find the most appropriate match from "Unified categories" using generalization, common sense, and the sentence context of the property.
     - If no suitable match exists, assign "NA" as the property_unified value.
 
 3. Output
@@ -338,13 +343,12 @@ Return the result in JSONL format, with one valid JSON object per line. Each obj
 
 5. Input Data
 
-Extracted properties: {original_property_list}
+Extracted items: {property_sentence_dicts}
 
 Unified categories: {unified_property_list}
 '''
     answer = llm.ask(prompt, **kwargs)
     return parse_JSONL(answer, required_fields=['property', 'property_unified'])
-
 
 
 
