@@ -294,6 +294,8 @@ if __name__ == '__main__':
                 print(f'Error while finding patterns for {pk}')
                 continue
 
+            if patterns_df.empty:
+                continue
 
             for cnt in range(args.n_repeats):
                 try:
@@ -310,7 +312,6 @@ if __name__ == '__main__':
                 store_error(error_data)                
                 print(f'Error while unifying actors for {pk}')
                 continue
-
 
             for cnt in range(args.n_repeats):
                 try:
