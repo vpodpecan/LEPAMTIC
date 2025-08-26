@@ -125,7 +125,7 @@ class ChatDialog:
         # quick hacks
         if 'googleapis' in self.base_url and 'seed' in kwargs:
             del kwargs['seed']
-        if 'openai' in self.base_url and 'temperature' in kwargs and (self.model.startswith('o1') or self.model.startswith('o3') or self.model.startswith('o4')):
+        if 'openai' in self.base_url and 'temperature' in kwargs and (self.model.startswith('o1') or self.model.startswith('o3') or self.model.startswith('o4') or self.model.startswith('gpt-5')):
             del kwargs['temperature']
         if 'openai' in self.base_url and 'reasoning_effort' in kwargs and not (self.model.startswith('o1') or self.model.startswith('o3') or self.model.startswith('o4')):
             del kwargs['reasoning_effort']

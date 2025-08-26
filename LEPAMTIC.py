@@ -128,6 +128,7 @@ Field-specific requirements:
     - "study_type" must be one of: "field", "greenhouse", or "pot/incubation".
     - "sentences" should contain the sentence(s) from which the pattern was extracted.
     - "comment" may include clarifying notes or "NA" if unused.
+    - If no comparator is explicitly stated, assume the contrasting practice is the standard untreated/control condition. In that case, set contrasting_land_management_practice = "Control" or "Untreated", contrasting_land_management_practice_unified = "Control" or "Untreated", and assign contrasting_land_management_practice_category to the same category as the tested practice.
 
 3. Unification Rules
 Apply the following terminology in the "*_unified" fields:
@@ -145,11 +146,13 @@ Grazing management
 Grazing, Ungrazed, Cattle rotation, No cattle rotation
 
 Pest management
-Biocides, Bt GMO crop, Herbicides, Nematicides, Plastic film mulch, Non-GMO, Untreated, Fungicides, Insecticides, Reduced biocide application
+Biocides, Bt GMO crop, Herbicides, Nematicides, Plastic film mulch, Non-GMO, Fungicides, Insecticides, Reduced biocide application
+
 
 Additional normalization
     - Represent "Conservation tillage" as "Reduced tillage".
-    - Represent "Agroforestry" as "Crop diversification".'''
+    - Represent "Agroforestry" as "Crop diversification".
+'''
 
     prompt_split_conjuncts = f'''Review the current list of extracted patterns. Some patterns may contain conjunctions in the property or actor fields.
 
