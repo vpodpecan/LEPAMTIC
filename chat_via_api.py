@@ -127,8 +127,12 @@ class ChatDialog:
             del kwargs['seed']
         if 'openai' in self.base_url and 'temperature' in kwargs and (self.model.startswith('o1') or self.model.startswith('o3') or self.model.startswith('o4') or self.model.startswith('gpt-5')):
             del kwargs['temperature']
-        if 'openai' in self.base_url and 'reasoning_effort' in kwargs and not (self.model.startswith('o1') or self.model.startswith('o3') or self.model.startswith('o4')):
+        if 'openai' in self.base_url and 'reasoning_effort' in kwargs and not (self.model.startswith('o1') or self.model.startswith('o3') or self.model.startswith('o4') or self.model.startswith('gpt-5')):
             del kwargs['reasoning_effort']
+        if 'openai' in self.base_url and 'verbosity' in kwargs and not self.model.startswith('gpt-5'):
+            del kwargs['verbosity']
+
+        print(f'DEBUB: model: {self.model}, kwargs: {kwargs}')
 
         response = self.client.chat.completions.create(model=self.model,
                                                        messages=self.messages,
