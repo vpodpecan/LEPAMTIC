@@ -132,7 +132,7 @@ class ChatDialog:
         if 'openai' in self.base_url and 'verbosity' in kwargs and not self.model.startswith('gpt-5'):
             del kwargs['verbosity']
 
-        print(f'DEBUB: model: {self.model}, kwargs: {kwargs}')
+        #print(f'DEBUG: model: {self.model}, kwargs: {kwargs}')
 
         response = self.client.chat.completions.create(model=self.model,
                                                        messages=self.messages,
