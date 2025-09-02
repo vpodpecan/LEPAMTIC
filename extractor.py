@@ -124,7 +124,6 @@ if __name__ == '__main__':
     add_common_args(score_parser)
     
     args = parser.parse_args()
-    args.seed = None
 
 
     # Validate input file
