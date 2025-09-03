@@ -10,7 +10,12 @@ import traceback
 from json import JSONDecodeError
 from tqdm import tqdm
 
+import logging
+
 from chat_via_api import ChatDialog
+
+
+logger = logging.getLogger("lepamtic.extractor")
 
 
 def get_LLM(model_name, args):
@@ -83,6 +88,18 @@ def read_data(fname):
     return df
 
 
+def setup_logging(debug):
+    # Keep everyone else quiet
+    logging.getLogger().handlers.clear()
+    logging.getLogger().setLevel(logging.WARNING)
+
+    app = logging.getLogger("lepamtic")
+    app.setLevel(logging.DEBUG if debug else logging.INFO)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.DEBUG if debug else logging.INFO)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    app.addHandler(handler)
+    app.propagate = False
 
 
 if __name__ == '__main__':
@@ -105,6 +122,7 @@ if __name__ == '__main__':
         subparser.add_argument('--openai_keyfile', type=str, required=False, help="A file containing OpenAI API key")
         subparser.add_argument('--google_keyfile', type=str, required=False, help="A file containing Google API key")
         subparser.add_argument('--base_url', type=str, required=False, help="URL of the local LLM")
+        subparser.add_argument("--debug", action="store_true", help="Enable debug output")
 
     parser = argparse.ArgumentParser(description='Run LLM processing on CSV input.')
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Select a mode to run")
@@ -124,6 +142,9 @@ if __name__ == '__main__':
     add_common_args(score_parser)
     
     args = parser.parse_args()
+
+    setup_logging(args.debug)
+    logger.debug('Debug mode ON')
 
 
     # Validate input file

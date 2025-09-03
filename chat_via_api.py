@@ -8,8 +8,11 @@ import time
 import json
 import base64
 import mimetypes
+import logging
 
 from openai import OpenAI
+
+logger = logging.getLogger(f"lepamtic.{__name__}")
 
 
 def image_to_base64(image_path):
@@ -102,16 +105,6 @@ class ChatDialog:
         result = response.choices[0].message.content
         return json.loads(result) if self.as_json else result
 
-        # if self.as_json:
-        #     try:
-        #        result = json.loads(result)
-        #     except:
-        #         print('Error loading JSON!')
-        #         print(result)
-        #         print('')
-        # return result
-      
-    
     
     def ask(self, question, print_answer=False, **kwargs):
         self.enforce_limits()            
@@ -132,7 +125,7 @@ class ChatDialog:
         if 'openai' in self.base_url and 'verbosity' in kwargs and not self.model.startswith('gpt-5'):
             del kwargs['verbosity']
 
-        #print(f'DEBUG: model: {self.model}, kwargs: {kwargs}')
+        logger.debug(f'API call: model: {self.model}, kwargs: {kwargs}')
 
         response = self.client.chat.completions.create(model=self.model,
                                                        messages=self.messages,
@@ -195,25 +188,3 @@ class ChatDialog:
                 fp.write('\n'.join(lines))
         else:
             print('\n'.join(lines))
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--api_key', required=True, help='Your API key')
-    parser.add_argument('--organization', default=None, required=False, help='Organization ID')
-    parser.add_argument('--model', required=False, default='gpt-4-1106-preview', help='Chat model to be used')
-    parser.add_argument('--base_url', required=False, default='https://api.openai.com/v1', help='Link to the api URI')
-    parser.add_argument('--role', required=False, default='You act as a helpful assistant', help='Initial instructions to the model')
-    args = parser.parse_args()
-
-    chat = ChatDialog(args.api_key,
-                      organization=args.organization,
-                      model=args.model,
-                      base_url=args.base_url,
-                      role=args.role,
-                      call_wait_time=1)
-    while True:
-        question = input('Type a message: ')
-        print(chat.ask(question))
-        print('')
-        
