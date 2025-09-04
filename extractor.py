@@ -146,6 +146,9 @@ if __name__ == '__main__':
     setup_logging(args.debug)
     logger.debug('Debug mode ON')
 
+    llm_parameters = {'seed': args.seed, 'temperature': args.temperature,
+                      'reasoning_effort': args.reasoning_effort, 'verbosity': args.verbosity}
+
 
     # Validate input file
     if not os.path.isfile(args.input_file):
@@ -177,7 +180,7 @@ if __name__ == '__main__':
             for cnt in range(args.n_repeats):
                 try:
                     llm.reset()
-                    score = lepamtic.prescreen(llm, abstract, seed=args.seed, temperature=args.temperature)[0]
+                    score = lepamtic.prescreen(llm, abstract, **llm_parameters)[0]
                 except JSONDecodeError as e:
                     print(e)
                     print(f'Error, attempt {cnt+1} of {args.n_repeats}')
@@ -222,7 +225,7 @@ if __name__ == '__main__':
             for cnt in range(args.n_repeats):
                 try:
                     scoring_llm.reset()
-                    score = lepamtic.extract_score(scoring_llm, abstract, seed=args.seed, temperature=args.temperature)[0]
+                    score = lepamtic.extract_score(scoring_llm, abstract, **llm_parameters)[0]
                 except JSONDecodeError as e:
                     print(e)
                     print(f'Error, attempt {cnt+1} of {args.n_repeats}')
@@ -288,7 +291,7 @@ if __name__ == '__main__':
             for cnt in range(args.n_repeats):
                 try:
                     scoring_llm.reset()
-                    score = lepamtic.extract_score(scoring_llm, abstract, seed=args.seed, temperature=args.temperature)[0]
+                    score = lepamtic.extract_score(scoring_llm, abstract, **llm_parameters)[0]
                 except JSONDecodeError as e:
                     print(e)
                     print(f'Error, attempt {cnt+1} of {args.n_repeats}')
@@ -303,7 +306,7 @@ if __name__ == '__main__':
             for cnt in range(args.n_repeats):
                 try:
                     llm.reset()
-                    patterns_df = pd.DataFrame(lepamtic.extract_patterns(llm, abstract, seed=args.seed, temperature=args.temperature))
+                    patterns_df = pd.DataFrame(lepamtic.extract_patterns(llm, abstract, **llm_parameters))
                     patterns_df.insert(0, PKEY, pk)
                 except JSONDecodeError as e:
                     print(e)
@@ -322,7 +325,7 @@ if __name__ == '__main__':
                 try:
                     llm.reset()
                     actor_sentence_dicts = patterns_df[['actor', 'sentences']].to_dict(orient="records")
-                    uactors_df = pd.DataFrame(lepamtic.unify_actors(llm, actor_sentence_dicts, unified_actors, seed=args.seed, temperature=args.temperature))
+                    uactors_df = pd.DataFrame(lepamtic.unify_actors(llm, actor_sentence_dicts, unified_actors, **llm_parameters))
                     patterns_df.insert(7, 'actor_unified', uactors_df['actor_unified'])
                 except JSONDecodeError as e:
                     print(e)
@@ -338,7 +341,7 @@ if __name__ == '__main__':
                 try:
                     llm.reset()
                     property_sentence_dicts = patterns_df[['property', 'sentences']].to_dict(orient="records")
-                    uproperties_df = pd.DataFrame(lepamtic.unify_property(llm, property_sentence_dicts, lepamtic.unified_properties, seed=args.seed, temperature=args.temperature))
+                    uproperties_df = pd.DataFrame(lepamtic.unify_property(llm, property_sentence_dicts, lepamtic.unified_properties, **llm_parameters))
                     patterns_df.insert(6, 'property_unified', uproperties_df['property_unified'])
                 except JSONDecodeError as e:
                     print(e)
