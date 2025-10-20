@@ -1,0 +1,906 @@
+---
+title: "Script 5 - Gap extraction overview"
+date: "2025-08-09"
+author: "Martina Lori & Ricardo Leitão"
+output:
+  html_document: default
+  pdata_document: default
+---
+This document contains the R script for the  **gap extraction overview** of the paper "Large Language Models as Rapid Evidence Synthesis Tools in Soil Ecology". To address the targeted literature gaps, selected abstracts were fed to the LLM for structured knowledge extraction using the developed prompt chain (LEPAMTIC_V6). The model-generated "extraction table" was then processed in a Python script to filter, normalize, and produce a "harmonized extraction table", which was subsequently tailored to the two focal gaps—biochar and retaining crop residues versus soil fauna, produce the "final extraction table", and analyzed to yield the final results of this study.
+
+In **part (A)** we check the “extraction table” and examined it in detail. In **part (B)** we check the “harmonized extraction table”. In **part (C)** We then take the harmonized extraction table and, in a series of structured steps, review each key extraction element to filter NAs, remove redundancies, and tailor the dataset to the study’s focal gaps—biochar and the retention of crop residues versus soil fauna. The final output is the "final extraction table". In **part (D)** we check the "final extraction table", describe the final results from several perspectives and build the final plots
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+
+```{r}
+library(stringr)
+library(readxl)
+library(ggh4x)
+library(ggpubr)
+library(tidyverse)
+```
+
+# Define folder paths
+```{r}
+# Define the path
+folder_path_tables <- "tables"
+
+# Create the directory if it doesn't already exist
+if (!dir.exists(folder_path_tables)) {
+  dir.create(folder_path_tables)
+}
+
+# Define the path
+folder_path_plots <- "plots"
+
+# Create the directory if it doesn't already exist
+if (!dir.exists(folder_path_plots)) {
+  dir.create(folder_path_plots)
+}
+```
+# .........................................................................................................
+# (A) Analize LLM Extraction table
+In part (A) we check the “extraction table” and examined it in detail, generating some numbers and plots.
+
+## Load data
+```{r}
+data1 <- read_excel("SI File 7 - LLM extraction table.xlsx", sheet = "Sheet1")
+```
+
+## Check LLM Gap extraction
+```{r}
+# Rows and columns
+ cat("Rows:", nrow(data1), "
+")
+ cat("Columns:", ncol(data1), "
+")
+
+# Column names
+ cat("Column names:
+")
+ print(colnames(data1))
+
+# Number of levels (distinct values) per column
+ levels_per_col <- data.frame(column = colnames(data1), n_levels = NA_integer_, stringsAsFactors = FALSE)
+ i <- 1
+ while (i <= ncol(data1)) {
+   levels_per_col$n_levels[i] <- length(unique(data1[[i]]))
+   i <- i + 1
+ }
+ print(levels_per_col)
+
+# Mean number of rows per level of 'abstracts'
+ abs_counts <- table(data1$UT..Unique.ID., useNA = "no")
+ cat("Mean rows per abstract:", mean(as.numeric(abs_counts)), "
+")
+ 
+data1 %>%
+  summarise(
+    n_rows     = n(),
+    doi_unique = n_distinct(UT..Unique.ID., na.rm = TRUE)  # unique non-NA DOIs
+  )
+
+# rows per level of UT..Unique.ID (keeps an NA row if there are NAs)
+by_id <- data1 %>%
+  count(`UT..Unique.ID.`, name = "rows_per_id")
+
+# summary stats across IDs (excluding NA if present)
+summary_stats <- by_id %>%
+  filter(!is.na(`UT..Unique.ID.`)) %>%
+  summarise(
+    n_levels  = n(),
+    mean_rows = mean(rows_per_id),
+    min_rows  = min(rows_per_id),
+    max_rows  = max(rows_per_id)
+  )
+
+by_id         # table of counts per ID
+summary_stats # mean/min/max across IDs
+```
+
+## Diagnostic plots
+```{r}
+# Line plot: number of rows per abstract (one value per abstract ID)
+abs_counts <- table(data1$UT..Unique.ID., useNA = "no")
+plot(as.numeric(abs_counts),
+     type = "l",
+     xlab = "Abstract (index)",
+     ylab = "Number of patterns",
+     main = "Rows per abstract")
+
+
+# 6) Barplot for 'scores' (0–5 in 0.5 steps, rounded and clamped)
+ scores_num <- as.numeric(data1$score)
+ scores_half <- round(scores_num * 2) / 2
+ scores_half[scores_half < 0] <- 0
+ scores_half[scores_half > 5] <- 5
+ levels_05 <- seq(0, 5, by = 0.5)
+ counts_05 <- table(factor(scores_half, levels = levels_05))
+ barplot(counts_05,
+         main = "Scores distribution (0–5, step 0.5)",
+         xlab = "Score",
+         ylab = "Count")
+
+# 7) Scatter plot: mean score per abstract (one point per abstract)
+idx <- !is.na(scores_num)
+mean_by_abs <- tapply(scores_num[idx], data1$UT..Unique.ID.[idx], mean)
+
+plot(x = as.numeric(mean_by_abs),
+     y = seq_along(mean_by_abs),
+     xlab = "Mean score",
+     ylab = "Abstract (index)",
+     main = "Mean score per abstract",
+     pch = 16)
+
+ 
+ 
+```
+# .........................................................................................................
+
+# (B) Analize LLM Harmonization extraction table
+In part (B) we simply give a quick to check the “harmonized extraction table” before proceeding with downstream analysis. The “harmonized extraction table” is the output of the script 3 "Filter_LLMs_output_v3.15" and is automatically saved in the folder "retained" under the name "output_final5.csv" when ruuning the script.
+ 
+## Load data
+```{r}
+#Load the data about variables extracted from meta-analyses
+data2 <- read.csv("SI File 8 - Harmonized extraction table.csv", header = TRUE,sep=',')
+head(data2)
+str(data2)
+```
+
+## Check LLM Gap extraction
+```{r}
+data2 %>%
+  summarise(
+    n_rows     = n(),
+    doi_unique = n_distinct(UT, na.rm = TRUE)  # unique non-NA DOIs
+  )
+
+# --- % of lost rows (relative to original) ---
+n1 <- nrow(data1)
+n2 <- nrow(data2)
+pct_rows_lost <- 100 * (n1 - n2) / n1
+
+# --- % of lost ID levels in `UT` (exclude NA) ---
+ids1 <- data1  %>% distinct(`UT..Unique.ID.`) %>% filter(!is.na(`UT..Unique.ID.`)) %>% pull()
+ids2 <- data2 %>% distinct(`UT`) %>% filter(!is.na(`UT`)) %>% pull()
+
+levels_lost <- setdiff(ids1, ids2)
+pct_levels_lost <- 100 * length(levels_lost) / length(unique(ids1))
+
+# Optional: a small summary tibble
+summary_out <- tibble(
+  rows_original     = n1,
+  rows_new          = n2,
+  rows_lost         = n1 - n2,
+  pct_rows_lost     = pct_rows_lost,
+  levels_original   = length(unique(ids1)),
+  levels_new        = length(unique(ids2)),
+  levels_lost       = length(levels_lost),
+  pct_levels_lost   = pct_levels_lost
+)
+
+summary_out
+```
+# .........................................................................................................
+
+# (C) Tailoring LLM Output to Literature Gaps
+In part (C) we then take the harmonized extraction table and  review each key extraction element to filter errors, adjust prcatice-contrast combinations, and tailor the dataset to the study’s focal gaps, namely biochar and the retention of crop residues versus soil fauna.
+
+## Curate table
+```{r}
+# remove  irrelevant colums
+columns_to_keep <- c("UT", "actor_unified", "property_unified", "effect", "land_management_practice_unified", "contrasting_land_management_practice_unified", "score","location_country", "study_type")
+data <- data2 %>%
+  select(all_of(columns_to_keep)) 
+data <- data %>% mutate(across(everything(), as.factor))
+head(data)
+str(data)
+
+#rename the columns 
+data <- data%>%
+  rename(
+    DOI = UT,
+    Actor = actor_unified,
+    Property = property_unified,
+    Effect = effect,
+    Practice = land_management_practice_unified,
+    Contrast = contrasting_land_management_practice_unified,
+    Score = score
+  )
+head(data)
+str(data)
+
+data %>%
+  summarise(
+    n_rows     = n(),
+    doi_unique = n_distinct(DOI, na.rm = TRUE)  # unique non-NA DOIs
+  )
+
+```
+
+## Filter actor
+```{r}
+levels(data$Actor)        # list levels
+
+## 1) Determine levels to keep (fauna)
+lvls <- if (is.factor(data$Actor)) levels(data$Actor) else sort(unique(data$Actor))
+
+keep_re <- paste(c(
+  "acari", "ants", "coleoptera", "collembola",
+  "earthworms", "enchytraeids", "isopods", "millipedes", "diplura",
+  "nematodes", "insects", "spiders", "protozoa",
+  "soil fauna", "soil macrofauna", "soil mesofauna", "soil microfauna"
+), collapse = "|")
+
+is_fauna_level <- grepl(keep_re, tolower(lvls))
+
+fauna_levels    <- lvls[ is_fauna_level]
+non_fauna_levels<- lvls[!is_fauna_level]
+
+fauna_levels
+non_fauna_levels
+
+data_fauna <- data %>%
+  filter(str_detect(Actor, regex(keep_re, ignore_case = TRUE))) %>%  # keep fauna only
+  mutate(Actor = factor(Actor)) 
+
+data_fauna %>%
+  summarise(
+    n_rows     = n(),
+    doi_unique = n_distinct(DOI, na.rm = TRUE)  # unique non-NA DOIs
+  )
+
+```
+
+## Filter property
+```{r}
+levels(data_fauna$Property)        # list levels
+```
+## Filter effect
+```{r}
+levels(data_fauna$Effect)        # list levels
+```
+## Filter practice for knowledge gaps selected
+```{r}
+levels(data_fauna$Practice)        # list levels
+
+keep <- c("Biochar", "Retaining crop residues")
+
+data_practice <- data_fauna %>%
+  filter(Practice %in% keep) %>%          # keep rows
+  mutate(Practice = droplevels(Practice)) # drop unused levels
+
+data_practice %>%
+  summarise(
+    n_rows     = n(),
+    doi_unique = n_distinct(DOI, na.rm = TRUE)  # unique non-NA DOIs
+  )
+```
+
+## Filter contrast
+```{r}
+data_practice <- data_practice %>%
+  mutate(across(where(is.factor), fct_drop))
+levels(data_practice$Practice)       # list levels
+levels(data_practice$Contrast) 
+practice_contrast_map <- data_practice %>%
+  filter(!is.na(Practice), !is.na(Contrast)) %>%
+  group_by(Practice) %>%
+  summarise(Contrast_levels = paste(sort(unique(Contrast)), collapse = ", "),
+            .groups = "drop")
+
+practice_contrast_map
+
+```
+
+## Check % lost
+```{r}
+# --- % of lost rows (relative to original) ---
+n1 <- nrow(data2)
+n2 <- nrow(data_practice)
+pct_rows_lost <- 100 * (n1 - n2) / n1
+
+# --- % of lost ID levels in `UT` (exclude NA) ---
+ids1 <- data2  %>% distinct(`UT`) %>% filter(!is.na(`UT`)) %>% pull()
+ids2 <- data_practice %>% distinct(`DOI`) %>% filter(!is.na(`DOI`)) %>% pull()
+
+levels_lost <- setdiff(ids1, ids2)
+pct_levels_lost <- 100 * length(levels_lost) / length(unique(ids1))
+
+# Optional: a small summary tibble
+summary_out <- tibble(
+  rows_original     = n1,
+  rows_new          = n2,
+  rows_lost         = n1 - n2,
+  pct_rows_lost     = pct_rows_lost,
+  levels_original   = length(unique(ids1)),
+  levels_new        = length(unique(ids2)),
+  levels_lost       = length(levels_lost),
+  pct_levels_lost   = pct_levels_lost
+)
+
+summary_out
+```
+
+## Save
+```{r}
+write.csv(data_practice, "Final_extraction_table.csv", row.names = FALSE, na = "")
+
+#saveRDS(data_practice, "Final_extraction_table.rds")
+
+```
+
+## Split Practices
+```{r}
+biochar <- data_practice %>%
+  filter(Practice == "Biochar") %>%
+  mutate(Practice = droplevels(Practice))
+
+retaining_residues <- data_practice %>%
+  filter(Practice == "Retaining crop residues") %>%
+  mutate(Practice = droplevels(Practice))
+```
+
+## Counts
+```{r}
+# 1) Add DOI_id (numbered by first appearance of each DOI)
+biochar2 <- biochar %>%
+  mutate(DOI_id = as.integer(factor(DOI, levels = unique(DOI))))
+
+# 2) Build the counts table and list the DOI_ids that contributed to each combo
+df_counts_biochar <- biochar2 %>%
+  unite("Practice_Effect_Actor_Property_Contrast",
+        Practice, Effect, Actor, Property, Contrast,
+        sep = "_", na.rm = TRUE) %>%
+  group_by(Practice_Effect_Actor_Property_Contrast) %>%
+  summarise(
+    count   = n(),
+    DOI_ids = paste(sort(unique(DOI_id[!is.na(DOI_id)])), collapse = ",")
+  , .groups = "drop") %>%
+  arrange(desc(count))
+
+# 1) Add DOI_id (numbered by first appearance of each DOI)
+retaining_residues2 <- retaining_residues %>%
+  mutate(DOI_id = as.integer(factor(DOI, levels = unique(DOI))))
+
+# 2) Build the counts table and list the DOI_ids that contributed to each combo
+df_counts_retaining_residues <- retaining_residues2 %>%
+  unite("Practice_Effect_Actor_Property_Contrast",
+        Practice, Effect, Actor, Property, Contrast,
+        sep = "_", na.rm = TRUE) %>%
+  group_by(Practice_Effect_Actor_Property_Contrast) %>%
+  summarise(
+    count   = n(),
+    DOI_ids = paste(sort(unique(DOI_id[!is.na(DOI_id)])), collapse = ",")
+  , .groups = "drop") %>%
+  arrange(desc(count))
+
+nem_pat <- regex("nematode", ignore_case = TRUE)
+nem_proto <- regex("protozoa", ignore_case = TRUE)
+col_join <- "Practice_Effect_Actor_Property_Contrast"
+
+biochar_nema <- df_counts_biochar %>%
+  filter(coalesce(str_detect(.data[[col_join]], nem_pat), FALSE))
+biochar_nema
+
+biochar_rest <- df_counts_biochar %>%
+  filter(!coalesce(str_detect(.data[[col_join]], nem_pat), FALSE))
+biochar_rest
+
+biochar_proto <- df_counts_biochar %>%
+  filter(coalesce(str_detect(.data[[col_join]], nem_proto), FALSE))
+biochar_proto
+
+residues_nema <- df_counts_retaining_residues %>%
+  filter(coalesce(str_detect(.data[[col_join]], nem_pat), FALSE))
+residues_nema
+
+residues_rest <- df_counts_retaining_residues %>%
+  filter(!coalesce(str_detect(.data[[col_join]], nem_pat), FALSE))
+residues_rest
+
+residues_proto <- df_counts_retaining_residues %>%
+  filter(coalesce(str_detect(.data[[col_join]], nem_proto), FALSE))
+residues_proto
+```
+# .........................................................................................................
+
+# (D) Final extraction table 
+In part (D), we first inspect the “final extraction table.” We then present and describe the results with summary plots, culminating in the final figures that show the number of extracted patterns distributed by (i) practice × actor and (ii) practice × property
+
+## Distribution of key elements plot
+```{r}
+#data <- read_csv("Final_extraction_table_Luis.csv")
+levels(data_practice$Actor)
+data <- data_practice
+num_levels <- data %>%  dplyr::summarise(n_levels = n_distinct(DOI))
+data$Actor[data$Actor == "Pest parasitic nematodes"] <- "Plant feeders nematodes"
+data$Actor[data$Actor == "Growth promoting protozoa"] <- "Protozoa"
+
+data$Actor <- droplevels(data$Actor)
+unique(levels(data$Actor))
+data <- data %>%
+   dplyr::mutate(Property = recode(Property, "biomass" = "abundance"))
+data <- data %>%
+  dplyr::mutate(Group = case_when(
+    Actor %in% c("Earthworms", "Isopods", "Millipedes", "Spiders", 
+                 "Predatory insects", "Pest insects", "Coleoptera", 
+                 "Ants", "Soil macrofauna") ~ "Macrofauna",
+    
+    Actor %in% c("Acari", "Collembola", "Enchytraeids", 
+                 "Herbivorous acari", "Soil mesofauna") ~ "Mesofauna",
+    
+    Actor %in% c("Bacterial feeders nematodes", "Fungal feeders nematodes", 
+                 "Omnivore-predatory nematodes", "Omnivore nematodes", 
+                "Plant feeders nematodes", 
+                 "Predatory nematodes", "Protozoa", "Nematodes", "Growth promoting protozoa",  
+                 "Soil microfauna") ~ "Microfauna",
+    
+    Actor %in% c("Soil fauna") ~ "Mixed/General",  
+    TRUE ~ NA_character_
+  ))
+
+data <- data %>%
+  mutate(study_type = na_if(trimws(study_type), ""))
+
+data <- data %>%
+  mutate(
+    Effect = if_else(
+      is.na(Effect), NA_character_,
+      str_replace(str_trim(Effect), "^([[:alpha:]])", ~ str_to_upper(.x))
+    )
+  )
+
+```
+
+## Diagnostic plots
+```{r}
+data_counts <- data %>%
+  pivot_longer(
+    cols = c(Group, Practice, Property, Contrast, study_type, location_country, Actor),
+    names_to = "category",
+    values_to = "level"
+  ) %>%
+  group_by(category, level) %>%
+  summarise(
+    pattern_count = n(),
+    DOIs_count    = n_distinct(DOI),
+    .groups = "drop"
+  )
+
+print(data_counts)
+
+```
+
+```{r}
+# Reorder category factor for facet_wrap
+data_counts <- data_counts %>%
+  filter(category != "Contrast") %>%
+  mutate(category = factor(category, levels = c(
+    "Group",   # replace with actual first category
+    "Property",
+    "Practice",
+    "study_type",
+    "location_country",
+    "Actor"
+  )))
+
+# Updated plot
+category_distribution <-
+  ggplot(data_counts, aes(x = level, y = pattern_count, fill = category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ category, scales = "free_y", ncol = 2) +
+  coord_flip() +
+  theme_bw() +
+  theme(
+    axis.text.y = element_text(hjust = 1),
+    legend.position = "none",
+    panel.grid.major = element_blank(),  # remove major grid lines
+    panel.grid.minor = element_blank()   # remove minor grid lines
+  ) +
+  scale_fill_manual(values = c(
+    "Group"       = "#D9A066",  # new earthy color
+    "Property"         = "#C97C41",  # terracotta
+    "Practice"         = "#8B5E3C",  # medium brown
+    "study_type"       = "#5C4033",  # dark brown
+    "location_country" = "#3E2723",  # very dark earthy brown
+    "Actor"            = "#E3B448"   # ochre yellow
+  )) +
+  labs(x = NULL)
+
+
+category_distribution
+
+# Save
+ggsave(filename = file.path(folder_path_plots, "category_distribution-patterns.png"),
+       plot = category_distribution,
+       width = 8, height =6, bg= "white")
+```
+
+```{r}
+# Patterns per abstract (assuming each row = one pattern)
+patterns_by_DOI <- data %>%
+  filter(!is.na(DOI)) %>%
+  count(DOI, name = "n_patterns")
+
+overall_summary <- patterns_by_DOI %>%
+  summarise(
+    abstracts   = n(),
+    total_patterns = sum(n_patterns),
+    mean_patterns_per_abstract   = mean(n_patterns),
+    median_patterns_per_abstract = median(n_patterns),
+    p25 = quantile(n_patterns, 0.25),
+    p75 = quantile(n_patterns, 0.75),
+    min = min(n_patterns),
+    max = max(n_patterns)
+  )
+
+patterns_by_DOI %>% arrange(desc(n_patterns)) %>% head(10)  # top contributors (optional)
+overall_summary
+
+```
+```{r}
+ggplot(patterns_by_DOI, aes(x = n_patterns)) +
+  geom_histogram(binwidth = 1) +
+  labs(x = "Patterns per abstract (DOI)", y = "Number of abstracts")
+
+```
+```{r}
+by_cat_level <- data %>%
+  filter(!is.na(DOI)) %>%
+  pivot_longer(
+    cols = c(Group, Practice, Property, Contrast, study_type, location_country, Actor),
+    names_to = "category",
+    values_to = "level"
+  ) %>%
+  group_by(category, level) %>%
+  summarise(
+    patterns   = n(),
+    abstracts  = n_distinct(DOI),
+    patterns_per_abstract = patterns / abstracts,
+    .groups = "drop"
+  ) %>%
+  arrange(category, desc(abstracts), desc(patterns))
+
+by_cat_level
+
+write.csv(
+  by_cat_level,
+  file = file.path(folder_path_tables, "key_elements_distribution.csv"),
+  row.names = FALSE
+)
+
+
+```
+
+## Post-processing plot
+Here we import one of the outputs of the "Filter_LLMs_output_v3.15", and is automatically saved in the folder "logs" under the name "output_final5_summary.csv" when ruuning the script.
+
+```{r}
+data_script <- readr::read_csv(
+  "Filter_LLM_output_final_summary.csv",
+  col_types = readr::cols(
+    Step        = readr::col_character(),
+    Description = readr::col_character(),
+    Kept        = readr::col_integer(),  # use col_double() if not integer counts
+    Removed     = readr::col_integer()
+  ),
+  show_col_types = FALSE
+)
+# Reshape to long format
+data_script_long <- data_script %>%
+  pivot_longer(cols = c(Kept, Removed),
+               names_to = "Status",
+               values_to = "Count")%>%
+  dplyr::mutate(Status = factor(Status, levels = c("Removed", "Kept"))) 
+
+# Plot stacked bar chart with earthy colors
+harmonization_summary_plot <- ggplot(data_script_long, aes(x = Step, y = Count, fill = Status)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c(
+    "Kept" = "black",    # earthy green
+    "Removed" = "lightgrey"  # earthy reddish-brown
+  )) +
+  theme_bw() +
+  labs(x = NULL, y = "Patterns", fill = NULL) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    panel.grid.major = element_blank(),  # remove major grid lines
+    panel.grid.minor = element_blank() )  # remove minor grid lines
+harmonization_summary_plot
+
+# Save
+ggsave(filename = file.path(folder_path_plots, "harmonization_summary_plot.png"),
+       plot = harmonization_summary_plot,
+       width = 5, height =2.5, bg= "white")
+```
+## GAP plots
+```{r}
+data$driver_contrast_pairs <- with(data, interaction(Practice, Contrast, drop = TRUE))
+levels(data$driver_contrast_pairs)
+data$observation <- 1
+
+#Unifiy contrasts
+data <- data %>%
+  dplyr::mutate(
+    Contrast = ifelse(
+      Practice == "Biochar" & driver_contrast_pairs %in% c("Biochar.Control", "Biochar.Unfertilized"),
+      "No biochar",
+      as.character(Contrast)  # keep other values unchanged
+    ),
+    Contrast = droplevels(factor(Contrast))  # convert to factor and drop unused levels
+  )
+
+data <- data %>%
+  dplyr::mutate(
+    Contrast = ifelse(
+      Practice == "Retaining crop residues" & driver_contrast_pairs %in% c("Retaining crop residues.Control", "Retaining crop residues.Unfertilized"),
+      "No retaining crop residues",
+      as.character(Contrast)  # keep other values unchanged
+    ),
+    Contrast = droplevels(factor(Contrast))  # convert to factor and drop unused levels
+  )
+
+levels(data$Contrast)
+```
+
+Harmonize nematodes
+```{r}
+data
+```
+
+Adding Response_group terminology
+
+```{r}
+unique(levels(data$Actor))
+
+data <- data %>%
+  mutate(Group = case_when(
+    Actor %in% c("Earthworms", "Isopods", "Millipedes", "Spiders", 
+                 "Predatory insects", "Pest insects", "Coleoptera", 
+                 "Ants", "Soil macrofauna") ~ "Macrofauna",
+    
+    Actor %in% c("Acari", "Collembola", "Enchytraeids", 
+                 "Herbivorous acari", "Soil mesofauna") ~ "Mesofauna",
+    
+    Actor %in% c("Bacterial feeders nematodes", "Fungal feeders nematodes", 
+                 "Omnivore-predatory nematodes", "Omnivore nematodes", 
+                  "Plant feeders nematodes", 
+                 "Predatory nematodes", "Protozoa", "Nematodes",   "Growth promoting protozoa", 
+                 "Soil microfauna") ~ "Microfauna",
+    
+    Actor %in% c("Soil fauna") ~ "Mixed/General",
+    
+    TRUE ~ NA_character_
+  ))
+```
+
+### Actor x Property
+```{r}
+data <- data %>%
+    dplyr::mutate(
+    AxP = interaction(Actor, Property, sep = "_"),
+    DxC = interaction(Practice, Contrast, sep = "::"),
+    AxPxDxC = interaction(Practice, Contrast, Actor, Property, sep = "::")
+  )
+```
+
+```{r}
+#Summaris counts per Effect and bar
+data_aggregated <- data %>%
+  dplyr::group_by(AxPxDxC, AxP, DxC, Effect, Group, Property) %>%
+    dplyr::summarise(observation = sum(as.numeric(observation), na.rm = TRUE), .groups = "drop")
+
+#Get totals per bar (across all effects)
+data_totals <- data_aggregated %>%
+    dplyr::group_by(AxPxDxC) %>%
+  dplyr::summarise(Total_observations = sum(observation), .groups = "drop")
+
+#Merge and calculate percentage
+data_merged_final <- data_aggregated %>%
+  left_join(data_totals, by = "AxPxDxC") %>%
+  dplyr::mutate(Percentage = observation / Total_observations * 100)
+```
+
+```{r}
+data_merged_final$Group <- factor(data_merged_final$Group,                   
+                                                  levels = c("Macrofauna","Mesofauna","Microfauna","Microbiome", "Mixed/General"), 
+                                                  labels = c("Macrofauna","Mesofauna","Microfauna","Microbiome", "Mix"))
+```
+
+
+```{r}
+data_merged_final$DxC <- droplevels(data_merged_final$DxC)
+levels(data_merged_final$DxC)
+
+data_merged_final$DxC <- factor(data_merged_final$DxC,                   
+                                                  levels = c("Biochar::No biochar","Retaining crop residues::No retaining crop residues"), 
+                                                  labels = c("Biochar","Crop residues"))
+
+data_merged_final$Property <- factor(data_merged_final$Property,                   
+                                                  levels = c("abundance","activity","diversity", "ecological index"), 
+                                                  labels = c("abu.","act.","div.", "EI"))
+
+
+
+data_merged_final <- data_merged_final %>%
+  mutate(
+    AxP_short = factor(sub("_.*", "", AxP))
+  )
+
+levels(data_merged_final$AxP_short)
+
+
+all_levels <- c(
+  "Soil fauna",                     # overarching
+  "Soil macrofauna",                # large soil animals
+  "Earthworms",                     # macrofauna
+  "Isopods",                        # macrofauna
+  "Ants",                           # macrofauna
+  "Coleoptera",                     # macrofauna/mesofauna
+  "Soil mesofauna",                 # medium soil animals
+  "Collembola",                      # mesofauna
+  "Acari",                           # mesofauna
+  "Soil microfauna",                 # small soil animals
+  "Protozoa",                        # microfauna
+   "Enchytraeids"  ,                   # micro/mesofauna
+  "Nematodes",                       # microfauna
+  "Bacterial feeders nematodes",     # microfauna functional
+  "Fungal feeders nematodes",        # microfauna functional
+  "Omnivore nematodes",              # microfauna functional
+  "Omnivore-predatory nematodes",    # microfauna functional
+  "Plant feeders nematodes",         # microfauna functional
+  "Predatory nematodes"            # microfauna functional
+       # microfauna functional
+ 
+) 
+
+
+data_merged_final$AxP_short <- factor(data_merged_final$AxP_short, levels = rev(all_levels))
+
+
+
+```
+
+```{r}
+#Plot
+plot_GAP1 <- ggplot(data_merged_final, aes(x = AxP_short, y = Percentage, fill = Effect, alpha = Total_observations)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  labs(x = "", y = "Relative Abundance (%)", fill = "Effect") +
+  geom_text(aes(label = observation),
+            position = position_stack(vjust = 0.5),
+            color = "black", size = 2.5,
+            alpha = 1) +   # keep text labels fully opaque
+  coord_flip() +
+  facet_nested(Group + Property ~ DxC, scales = "free_y", space = "free", nest_line = TRUE) +
+  guides(
+    fill = guide_legend(nrow = 1, byrow = TRUE),
+    alpha = "none"   # remove alpha legend
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 8),
+    strip.text.x = element_text(size = 8),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    ggh4x.facet.nestline = element_line(linetype = 3)
+  ) +
+  scale_fill_manual(values = c("#E64B35B2", "#83A485", "#bfb1a4")) +
+  scale_y_continuous(breaks = c(25, 75)) +
+  scale_alpha_continuous(range = c(0.4, 1)) +  # control alpha scaling
+  labs(x = "", y = "%", fill = "")
+  
+
+plot_GAP1
+ggsave(filename = file.path(folder_path_plots, "GAP1_property.png"),
+       plot = plot_GAP1,
+       width = 6, height = 8.5, bg= "white")
+```
+
+### Actor 
+```{r}
+data_actor <- data %>%
+  mutate(
+    DxC = interaction(Practice, Contrast, sep = "::"),
+    AxDxC = interaction(Practice, Contrast, Actor, sep = "::") # no property here
+  )
+
+data_actor_agg <- data_actor %>%
+  dplyr::group_by(AxDxC, Actor, DxC, Effect, Group) %>%
+  dplyr::summarise(observation = sum(as.numeric(observation), na.rm = TRUE),
+                   .groups = "drop")
+
+data_actor_totals <- data_actor_agg %>%
+  dplyr::group_by(AxDxC) %>%
+  dplyr::summarise(Total_observations = sum(observation), .groups = "drop")
+
+data_actor_final <- data_actor_agg %>%
+  left_join(data_actor_totals, by = "AxDxC") %>%
+  mutate(Percentage = observation / Total_observations * 100)
+
+data_actor_final$Group <- factor(data_actor_final$Group,                   
+                               levels = c("Macrofauna","Mesofauna","Microfauna","Microbiome", "Mixed/General"), 
+                               labels = c("Macrofauna","Mesof.","Microfauna","Microbiome", "Mix"))
+
+
+data_actor_final$DxC <- droplevels(data_actor_final$DxC)
+levels(data_merged_final$DxC)
+
+data_actor_final$DxC <- factor(data_actor_final$DxC,                   
+                             levels = c("Biochar::No biochar","Retaining crop residues::No retaining crop residues"), 
+                             labels = c("Biochar","Crop residues"))
+
+
+levels(data_actor_final$Actor)
+data_actor_final$Actor <- factor(data_actor_final$Actor, 
+                                   levels = rev(c(
+                                     "Soil fauna",                     # overarching
+  "Soil macrofauna",                # large soil animals
+  "Earthworms",                     # macrofauna
+  "Isopods",                        # macrofauna
+  "Ants",                           # macrofauna
+  "Coleoptera",                     # macrofauna/mesofauna
+  "Soil mesofauna",                 # medium soil animals
+  "Collembola",                      # mesofauna
+  "Acari",                           # mesofauna
+  "Soil microfauna",                 # small soil animals
+  "Protozoa",                        # microfauna
+   "Enchytraeids"  ,                   # micro/mesofauna
+  "Nematodes",                       # microfauna
+  "Bacterial feeders nematodes",     # microfauna functional
+  "Fungal feeders nematodes",        # microfauna functional
+  "Omnivore nematodes",              # microfauna functional
+  "Omnivore-predatory nematodes",    # microfauna functional
+  "Plant feeders nematodes",         # microfauna functional
+  "Predatory nematodes"             # microfauna functional
+ 
+ 
+                                   )))
+```
+
+```{r}
+# Plot
+plot_actor <- ggplot(data_actor_final, aes(x = Actor, y = Percentage, fill = Effect, alpha = Total_observations)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  labs(x = "", y = "Relative Abundance (%)", fill = "Effect") +
+  geom_text(aes(label = observation),
+            position = position_stack(vjust = 0.5),
+            color = "black", size = 2.5,
+            alpha = 1) +   # keep text fully opaque
+  coord_flip() +
+  facet_nested(Group ~ DxC, scales = "free_y", space = "free", nest_line = TRUE) +
+  guides(
+    fill = guide_legend(nrow = 1, byrow = TRUE),
+    alpha = "none"   # <-- remove alpha legend
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 8),
+    strip.text.x = element_text(size = 8),
+    ggh4x.facet.nestline = element_line(linetype = 3),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  scale_fill_manual(values = c("#E64B35B2", "#83A485", "#bfb1a4")) +
+  scale_y_continuous(breaks = c(25, 75)) +
+  scale_alpha_continuous(range = c(0.4, 1))
+
+
+plot_actor
+
+# Save
+ggsave(filename = file.path(folder_path_plots, "GAP1_actor_alpha.png"),
+       plot = plot_actor,
+       width = 6, height = 5, bg= "white")
+```
+
+
+
+

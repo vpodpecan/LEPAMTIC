@@ -1,0 +1,2283 @@
+---
+title: "Script 2 - LLM extraction evaluation"
+author: "Martina Lori & Ricardo Leitão"
+date: "2025-01-28"
+output:
+  html_document: default
+  pdf_document: default
+---
+This document contains the R script for the  **LLM extraction evaluation** of the paper "Large Language Models as Rapid Evidence Synthesis Tools in Soil Ecology". It reports on the evaluation of an LLM using a developed prompt, LEPAMTIC, designed to extract structured knowledge from abstracts in the field of soil biota and management practices. The goal was to target primary research articles in areas where meta-analytical knowledge is not yet available, providing synthesized insights that go beyond descriptive or “best guess” approaches.
+
+LEPAMTIC was developed interactively using a sets of abstracts and is designed to capture structured information across 12 columns representing extraction elements (e.g., driver, actor, property, effect, method, location, study type). Each row represents a knowledge pattern consisting of a management practice contrasted with an alternative practice and its effect on a soil actor and property, alongside contextual details such as methods, temporal or spatial scope, and study type.
+
+To evaluate performance, the pipeline was applied to 40 randomly selected open-access abstracts from different time periods and journals in the field of soil biota and management practices (excluding system comparisons). The extractions were compared against those performed by four trained annotators, who followed a detailed guideline handbook (human annotator guidelines) they had jointly developed.
+
+In **part (A)** we present Recall, Precision, and F1-scores for seven key extraction elements, comparing LLM outputs with human annotations. In **part (B)** we present a Precision–Recall scatter plot. In **part (C)** we do the overall extraction evaluation and show the  inter-annotator agreement. In **part (D)**. In *part (E)* we evaluate the LLM unification step.
+
+# Load libraries
+```{r, results="hide"}
+library(gridExtra)
+library(ggthemr)
+library(ggh4x)
+library(circlize)
+library(ggplot2)
+library(kableExtra)
+library(gt)
+library(stringr)
+library(cowplot)
+library(purrr)
+library(scales)
+library(grid)
+library(patchwork)
+library(readxl)
+library(tidyverse)
+```
+
+# Define folder paths
+```{r}
+# Define the path
+folder_path_tables <- "tables"
+
+# Create the directory if it doesn't already exist
+if (!dir.exists(folder_path_tables)) {
+  dir.create(folder_path_tables)
+}
+
+# Define the path
+folder_path_plots <- "plots"
+
+# Create the directory if it doesn't already exist
+if (!dir.exists(folder_path_plots)) {
+  dir.create(folder_path_plots)
+}
+```
+
+# Load data
+```{r}
+data1 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_1")
+data2 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_2")
+data3 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_3")
+data4 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_4")
+data1$Entity <- factor(data1$Entity)
+data2$Entity <- factor(data2$Entity)
+data3$Entity <- factor(data3$Entity)
+data4$Entity <- factor(data4$Entity)
+```
+
+```{r}
+data1 <-data1 %>%mutate(Entity = fct_recode(Entity,
+                                  "Annotator_1" = "ML"))
+data2 <-data2 %>%mutate(Entity = fct_recode(Entity,
+                                   "Annotator_2" = "RL"))
+data3 <-data3 %>%mutate(Entity = fct_recode(Entity,
+                                   "Annotator_3" = "CI"))
+data4 <-data4 %>%mutate(Entity = fct_recode(Entity,
+                                   "Annotator_4" = "FD"))
+
+data1$evaluator <- "Annotator_1"
+data2$evaluator <- "Annotator_2"
+data3$evaluator <- "Annotator_3"
+data4$evaluator <- "Annotator_4"
+
+data_all <- rbind(data1, data2, data3, data4)
+```
+
+```{r}
+data_all[] <- lapply(data_all, as.factor)
+filtered_data <- data_all %>%
+  filter(Entity == "LLM")%>%
+  droplevels()
+```
+# .........................................................................................................
+# (A) R, PR and F1 by extraction element
+
+In part (A) we firstly calculate Recall (completeness), Precision (correctness), and the harmonic mean F1-score for the combination of the seven extraction elements (Driver, Actor, Property, Effect, Contrast, Study type and Location) by comparing LLM extraction with human extractions. Recall, Precision, and F1-score are computed for each DOI and Annotator to normalize rows per abstract. These calculations are performed separately for each Annotator and reported as boxplots.
+
+We based our calculations on the concepts of **True Positives (TP)**, **False Negatives (FN)**, and **False Positives (FP)**. In the context of knowledge extraction evaluation, **TP** refers to instances where the model and the Annotator agree and extracted the same kowldge. **FP** refers to instances where the model extracts knowledge that is either false or irrelevant compared to the Annotator knowledge extraction. **FN** refers to instances where the model misses information that the Annotator has extracted.
+
+
+Thus for each abstract we computed:
+
+- exact_match = TP
+- Annotator_count = TP + FN
+- LLM_count = TP + FP
+
+and then calclulated
+
+- Precision = TP / (TP + FP) =  exact_match/LLM_count
+- Recall = TP / (TP + FN)  =  exact_mtach/Annotator_count
+- F1 = 2 × (Precision × Recall) / (Precision + Recall)
+
+## Annotator_1 versus LEPAMTIC
+
+```{r}
+# Elements to evaluate
+elements <- c(
+  "land_management_practice",
+  "actor",
+  "property",
+  "effect",
+  "contrasting_land_management_practice",
+  "location_country",
+  "study_type"
+)
+
+# ---- helper to compute matches / precision / recall / F1 for one element ----
+agree_one_element <- function(df, element, annotator_name = "Annotator_1") {
+  stopifnot(all(c("DOI", "Entity") %in% names(df)))
+  if (!element %in% names(df)) {
+    warning(sprintf("Column '%s' not found. Skipping.", element))
+    return(NULL)
+  }
+
+  # 1) Per-DOI counts by value for each entity (drop NA values for this element)
+  value_counts <- df %>%
+    filter(Entity %in% c("LLM", annotator_name)) %>%
+    filter(!is.na(.data[[element]])) %>%
+    group_by(DOI, Entity, value = .data[[element]]) %>%
+    summarise(count = n(), .groups = "drop")
+
+  # 2) Side-by-side counts and per-value matches
+  wide_counts <- value_counts %>%
+    tidyr::pivot_wider(
+      names_from  = Entity,
+      values_from = count,
+      values_fill = 0
+    )
+
+  match_summary <- wide_counts %>%
+    mutate(match_count = pmin(.data[["LLM"]], .data[[annotator_name]])) %>%
+    group_by(DOI) %>%
+    summarise(exact_matches = sum(match_count), .groups = "drop")
+
+  # 3) Total items extracted per DOI by each entity
+  entity_totals <- df %>%
+    filter(Entity %in% c(annotator_name, "LLM")) %>%
+    group_by(DOI, Entity) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    tidyr::pivot_wider(
+      names_from = Entity,
+      values_from = count,
+      values_fill = 0
+    ) %>%
+    rename(
+      !!paste0(annotator_name, "_count") := all_of(annotator_name),
+      LLM_count = LLM
+    )
+
+  # 4) Precision/Recall/F1 (%)
+  out <- match_summary %>%
+    left_join(entity_totals, by = "DOI") %>%
+    mutate(
+      percentage_recall    = if_else(.data[[paste0(annotator_name, "_count")]] > 0,
+                                     100 * exact_matches / .data[[paste0(annotator_name, "_count")]],
+                                     NA_real_),
+      percentage_precision = if_else(LLM_count > 0,
+                                     100 * exact_matches / LLM_count,
+                                     NA_real_),
+      F1 = if_else(
+        is.na(percentage_recall) | is.na(percentage_precision) |
+          (percentage_recall + percentage_precision) == 0,
+        NA_real_,
+        2 * (percentage_precision * percentage_recall) /
+          (percentage_precision + percentage_recall)
+      ),
+      extraction_element = element
+    )
+
+  out
+}
+
+# ---- run for all elements and bind rows ----
+all_results_Annotator_1 <- elements %>%
+  map(~ agree_one_element(data1, element = .x, annotator_name = "Annotator_1")) %>%
+  bind_rows()
+
+# Peek
+all_results_Annotator_1 <- all_results_Annotator_1 %>%
+  dplyr::mutate(F1 = ifelse(is.na(F1), 0, F1))
+all_results_Annotator_1 <- all_results_Annotator_1 %>% mutate(evaluator = "Annotator_1")
+
+print(all_results_Annotator_1)
+
+# final_results now contains:
+# DOI, extraction_element, evaluator, exact_matches, Annotator_1_count, LLM_count,
+# percentage_recall, percentage_precision, F1, Score
+write.csv(
+  all_results_Annotator_1,
+  file = file.path(folder_path_tables, "final_results_annotator_1.csv"),
+  row.names = FALSE
+)
+```
+
+## Annotator_2 versus LEPAMTIC
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+# Elements to evaluate
+elements <- c(
+  "land_management_practice",
+  "actor",
+  "property",
+  "effect",
+  "contrasting_land_management_practice",
+  "location_country",
+  "study_type"
+)
+
+# ---- helper to compute matches / precision / recall / F1 for one element ----
+agree_one_element <- function(df, element, annotator_name = "Annotator_2") {
+  stopifnot(all(c("DOI", "Entity") %in% names(df)))
+  if (!element %in% names(df)) {
+    warning(sprintf("Column '%s' not found. Skipping.", element))
+    return(NULL)
+  }
+
+  # 1) Per-DOI counts by value for each entity (drop NA values for this element)
+  value_counts <- df %>%
+    filter(Entity %in% c("LLM", annotator_name)) %>%
+    filter(!is.na(.data[[element]])) %>%
+    group_by(DOI, Entity, value = .data[[element]]) %>%
+    summarise(count = n(), .groups = "drop")
+
+  # 2) Side-by-side counts and per-value matches
+  wide_counts <- value_counts %>%
+    tidyr::pivot_wider(
+      names_from  = Entity,
+      values_from = count,
+      values_fill = 0
+    )
+
+  match_summary <- wide_counts %>%
+    mutate(match_count = pmin(.data[["LLM"]], .data[[annotator_name]])) %>%
+    group_by(DOI) %>%
+    summarise(exact_matches = sum(match_count), .groups = "drop")
+
+  # 3) Total items extracted per DOI by each entity
+  entity_totals <- df %>%
+    filter(Entity %in% c(annotator_name, "LLM")) %>%
+    group_by(DOI, Entity) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    tidyr::pivot_wider(
+      names_from = Entity,
+      values_from = count,
+      values_fill = 0
+    ) %>%
+    rename(
+      !!paste0(annotator_name, "_count") := all_of(annotator_name),
+      LLM_count = LLM
+    )
+
+  # 4) Precision/Recall/F1 (%)
+  out <- match_summary %>%
+    left_join(entity_totals, by = "DOI") %>%
+    mutate(
+      percentage_recall    = if_else(.data[[paste0(annotator_name, "_count")]] > 0,
+                                     100 * exact_matches / .data[[paste0(annotator_name, "_count")]],
+                                     NA_real_),
+      percentage_precision = if_else(LLM_count > 0,
+                                     100 * exact_matches / LLM_count,
+                                     NA_real_),
+      F1 = if_else(
+        is.na(percentage_recall) | is.na(percentage_precision) |
+          (percentage_recall + percentage_precision) == 0,
+        NA_real_,
+        2 * (percentage_precision * percentage_recall) /
+          (percentage_precision + percentage_recall)
+      ),
+      extraction_element = element
+    )
+
+  out
+}
+
+# ---- run for all elements and bind rows ----
+all_results_Annotator_2 <- elements %>%
+  map(~ agree_one_element(data2, element = .x, annotator_name = "Annotator_2")) %>%
+  bind_rows()
+
+# Peek
+all_results_Annotator_2 <- all_results_Annotator_2 %>%
+  dplyr::mutate(F1 = ifelse(is.na(F1), 0, F1))
+all_results_Annotator_2 <- all_results_Annotator_2 %>% mutate(evaluator = "Annotator_2")
+
+print(all_results_Annotator_2)
+
+# final_results now contains:
+# DOI, extraction_element, evaluator, exact_matches, Annotator_2_count, LLM_count,
+# percentage_recall, percentage_precision, F1, Score
+write.csv(
+  all_results_Annotator_2,
+  file = file.path(folder_path_tables, "final_results_Annotator_2.csv"),
+  row.names = FALSE
+)
+```
+
+## Annotator_3 versus LEPAMTIC
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+# Elements to evaluate
+elements <- c(
+  "land_management_practice",
+  "actor",
+  "property",
+  "effect",
+  "contrasting_land_management_practice",
+  "location_country",
+  "study_type"
+)
+
+# ---- helper to compute matches / precision / recall / F1 for one element ----
+agree_one_element <- function(df, element, annotator_name = "Annotator_3") {
+  stopifnot(all(c("DOI", "Entity") %in% names(df)))
+  if (!element %in% names(df)) {
+    warning(sprintf("Column '%s' not found. Skipping.", element))
+    return(NULL)
+  }
+
+  # 1) Per-DOI counts by value for each entity (drop NA values for this element)
+  value_counts <- df %>%
+    filter(Entity %in% c("LLM", annotator_name)) %>%
+    filter(!is.na(.data[[element]])) %>%
+    group_by(DOI, Entity, value = .data[[element]]) %>%
+    summarise(count = n(), .groups = "drop")
+
+  # 2) Side-by-side counts and per-value matches
+  wide_counts <- value_counts %>%
+    tidyr::pivot_wider(
+      names_from  = Entity,
+      values_from = count,
+      values_fill = 0
+    )
+
+  match_summary <- wide_counts %>%
+    mutate(match_count = pmin(.data[["LLM"]], .data[[annotator_name]])) %>%
+    group_by(DOI) %>%
+    summarise(exact_matches = sum(match_count), .groups = "drop")
+
+  # 3) Total items extracted per DOI by each entity
+  entity_totals <- df %>%
+    filter(Entity %in% c(annotator_name, "LLM")) %>%
+    group_by(DOI, Entity) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    tidyr::pivot_wider(
+      names_from = Entity,
+      values_from = count,
+      values_fill = 0
+    ) %>%
+    rename(
+      !!paste0(annotator_name, "_count") := all_of(annotator_name),
+      LLM_count = LLM
+    )
+
+  # 4) Precision/Recall/F1 (%)
+  out <- match_summary %>%
+    left_join(entity_totals, by = "DOI") %>%
+    mutate(
+      percentage_recall    = if_else(.data[[paste0(annotator_name, "_count")]] > 0,
+                                     100 * exact_matches / .data[[paste0(annotator_name, "_count")]],
+                                     NA_real_),
+      percentage_precision = if_else(LLM_count > 0,
+                                     100 * exact_matches / LLM_count,
+                                     NA_real_),
+      F1 = if_else(
+        is.na(percentage_recall) | is.na(percentage_precision) |
+          (percentage_recall + percentage_precision) == 0,
+        NA_real_,
+        2 * (percentage_precision * percentage_recall) /
+          (percentage_precision + percentage_recall)
+      ),
+      extraction_element = element
+    )
+
+  out
+}
+
+# ---- run for all elements and bind rows ----
+all_results_Annotator_3 <- elements %>%
+  map(~ agree_one_element(data3, element = .x, annotator_name = "Annotator_3")) %>%
+  bind_rows()
+
+# Peek
+all_results_Annotator_3 <- all_results_Annotator_3 %>%
+  dplyr::mutate(F1 = ifelse(is.na(F1), 0, F1))
+all_results_Annotator_3 <- all_results_Annotator_3 %>% mutate(evaluator = "Annotator_3")
+
+print(all_results_Annotator_3)
+
+# final_results now contains:
+# DOI, extraction_element, evaluator, exact_matches, Annotator_3_count, LLM_count,
+# percentage_recall, percentage_precision, F1, Score
+write.csv(
+  all_results_Annotator_3,
+  file = file.path(folder_path_tables, "final_results_Annotator_3.csv"),
+  row.names = FALSE
+)
+```
+
+## Annotator_4 versus LEPAMTIC
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+# Elements to evaluate
+elements <- c(
+  "land_management_practice",
+  "actor",
+  "property",
+  "effect",
+  "contrasting_land_management_practice",
+  "location_country",
+  "study_type"
+)
+
+# ---- helper to compute matches / precision / recall / F1 for one element ----
+agree_one_element <- function(df, element, annotator_name = "Annotator_4") {
+  stopifnot(all(c("DOI", "Entity") %in% names(df)))
+  if (!element %in% names(df)) {
+    warning(sprintf("Column '%s' not found. Skipping.", element))
+    return(NULL)
+  }
+
+  # 1) Per-DOI counts by value for each entity (drop NA values for this element)
+  value_counts <- df %>%
+    filter(Entity %in% c("LLM", annotator_name)) %>%
+    filter(!is.na(.data[[element]])) %>%
+    group_by(DOI, Entity, value = .data[[element]]) %>%
+    summarise(count = n(), .groups = "drop")
+
+  # 2) Side-by-side counts and per-value matches
+  wide_counts <- value_counts %>%
+    tidyr::pivot_wider(
+      names_from  = Entity,
+      values_from = count,
+      values_fill = 0
+    )
+
+  match_summary <- wide_counts %>%
+    mutate(match_count = pmin(.data[["LLM"]], .data[[annotator_name]])) %>%
+    group_by(DOI) %>%
+    summarise(exact_matches = sum(match_count), .groups = "drop")
+
+  # 3) Total items extracted per DOI by each entity
+  entity_totals <- df %>%
+    filter(Entity %in% c(annotator_name, "LLM")) %>%
+    group_by(DOI, Entity) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    tidyr::pivot_wider(
+      names_from = Entity,
+      values_from = count,
+      values_fill = 0
+    ) %>%
+    rename(
+      !!paste0(annotator_name, "_count") := all_of(annotator_name),
+      LLM_count = LLM
+    )
+
+  # 4) Precision/Recall/F1 (%)
+  out <- match_summary %>%
+    left_join(entity_totals, by = "DOI") %>%
+    mutate(
+      percentage_recall    = if_else(.data[[paste0(annotator_name, "_count")]] > 0,
+                                     100 * exact_matches / .data[[paste0(annotator_name, "_count")]],
+                                     NA_real_),
+      percentage_precision = if_else(LLM_count > 0,
+                                     100 * exact_matches / LLM_count,
+                                     NA_real_),
+      F1 = if_else(
+        is.na(percentage_recall) | is.na(percentage_precision) |
+          (percentage_recall + percentage_precision) == 0,
+        NA_real_,
+        2 * (percentage_precision * percentage_recall) /
+          (percentage_precision + percentage_recall)
+      ),
+      extraction_element = element
+    )
+
+  out
+}
+
+# ---- run for all elements and bind rows ----
+all_results_Annotator_4 <- elements %>%
+  map(~ agree_one_element(data4, element = .x, annotator_name = "Annotator_4")) %>%
+  bind_rows()
+
+# Peek
+all_results_Annotator_4 <- all_results_Annotator_4 %>%
+  dplyr::mutate(F1 = ifelse(is.na(F1), 0, F1))
+all_results_Annotator_4 <- all_results_Annotator_4 %>% mutate(evaluator = "Annotator_4")
+
+print(all_results_Annotator_4)
+
+# final_results now contains:
+# DOI, extraction_element, evaluator, exact_matches, Annotator_4_count, LLM_count,
+# percentage_recall, percentage_precision, F1, Score
+write.csv(
+  all_results_Annotator_4,
+  file = file.path(folder_path_tables, "final_results_Annotator_4.csv"),
+  row.names = FALSE
+)
+```
+
+
+## Combine all 
+```{r}
+result_Annotator_1 <- all_results_Annotator_1 %>%
+  rename(Annotator_count = Annotator_1_count)
+
+result_Annotator_2 <- all_results_Annotator_2 %>%
+  rename(Annotator_count = Annotator_2_count)
+
+result_Annotator_3 <- all_results_Annotator_3 %>%
+  rename(Annotator_count = Annotator_3_count)
+
+result_Annotator_4 <- all_results_Annotator_4 %>%
+  rename(Annotator_count = Annotator_4_count)
+
+results_all <- rbind(result_Annotator_1, result_Annotator_2, result_Annotator_3, result_Annotator_4)
+results_all <- results_all %>%
+  mutate(F1 = ifelse(is.nan(F1), 0, F1))
+head(results_all)
+str(results_all)
+```
+
+## Check results
+```{r}
+results_all_0 <- results_all %>%
+  mutate(evaluator = recode(evaluator,
+    "Annotator_1" = "#1",
+    "Annotator_2" = "#2",
+    "Annotator_3" = "#3",
+    "Annotator_4" = "#4"
+  ))
+
+  df_long <- results_all_0 %>%
+    select(extraction_element, evaluator, percentage_recall, percentage_precision, F1, DOI) %>%
+    pivot_longer(
+      cols = c(percentage_recall, percentage_precision, F1),
+      names_to = "metric",
+      values_to = "value"
+    ) %>%
+    mutate(
+      metric = recode(metric,
+        "percentage_recall"    = "R",
+        "percentage_precision" = "P",
+        "F1"                   = "F1"
+      ),
+      metric = factor(metric, levels = c("R", "P", "F1"))
+    )
+df_long
+
+file_path <- file.path(folder_path_tables, "metric_by_column.csv")
+write.csv(df_long, file = file_path, row.names = FALSE)
+
+df_means <- df_long %>%
+    group_by(metric, evaluator, extraction_element) %>%
+    summarise(mean_value = mean(value, na.rm = TRUE), .groups = "drop")
+df_means
+
+file_path <- file.path(folder_path_tables, "mean_metric_by_column.csv")
+write.csv(df_means, file = file_path, row.names = FALSE)
+
+df_means_evaluator <- df_long %>%
+    group_by(metric, extraction_element) %>%
+    summarise(mean_value = mean(value, na.rm = TRUE), .groups = "drop")
+df_means_evaluator
+
+file_path <- file.path(folder_path_tables, "mean_evaluator_by_column.csv")
+write.csv(df_means_evaluator, file = file_path, row.names = FALSE)
+
+```
+
+## Boxplots
+```{r}
+my_palette <- c("#B8D8D2", "#C8D9A7", "#D6A77A")
+results_all_0 <- results_all %>%
+  mutate(evaluator = recode(evaluator,
+    "Annotator_1" = "#1",
+    "Annotator_2" = "#2",
+    "Annotator_3" = "#3",
+    "Annotator_4" = "#4"
+  )) %>%
+  mutate(extraction_element = recode(extraction_element,
+    "land_management_practice" = "Land management practice",
+    "actor" = "Actor",
+    "property" = "Property",
+    "effect" = "Effect",
+    "contrasting_land_management_practice" = "Contrasting land management practice",
+    "location_country" = "Country",
+    "study_type" = "Study type"
+  ))
+
+elements <- c(
+  "Land management practice",
+  "Actor",
+  "Property",
+  "Effect",
+  "Contrasting land management practice",
+  "Country",
+  "Study type"
+)
+# optional: ensure palette has names matching metric codes
+# my_palette <- c(R = "#1b9e77", P = "#7570b3", F1 = "#d95f02")
+
+plot_list <- vector("list", length(elements))
+names(plot_list) <- elements
+
+for (i in seq_along(elements)) {
+  el <- elements[i]
+
+  results_el <- results_all_0 %>%
+    dplyr::filter(extraction_element == el) %>%
+    droplevels()
+
+  df_long <- results_el %>%
+    select(evaluator, percentage_recall, percentage_precision, F1) %>%
+    pivot_longer(
+      cols = c(percentage_recall, percentage_precision, F1),
+      names_to = "metric",
+      values_to = "value"
+    ) %>%
+    mutate(
+      metric = recode(metric,
+        "percentage_recall"    = "R",
+        "percentage_precision" = "P",
+        "F1"                   = "F1"
+      ),
+      metric = factor(metric, levels = c("R", "P", "F1"))
+    )
+
+  # NEW: medians per evaluator × metric
+  df_means <- df_long %>%
+    group_by(evaluator, metric) %>%
+    summarise(mean_value = mean(value, na.rm = TRUE), .groups = "drop")
+
+p <- ggplot(df_long, aes(x = evaluator, y = value)) + # Changed x to evaluator
+    geom_boxplot(fill = NA, color = "black", width = 0.6, outlier.shape = NA) +
+    geom_point(
+      aes(color = metric), # Color by metric remains
+      position = position_jitter(width = 0.3, height = 0.3),
+      size = 1.7, alpha = 0.7
+    ) +
+    geom_point(
+      data = df_means,
+      aes(x = evaluator, y = mean_value), # Changed x to evaluator
+      color = "black", fill = "black",
+      shape = 21, size = 3, stroke = 0.5
+    ) +
+    geom_text(
+      data = df_means,
+      aes(x = evaluator, y = mean_value, label = paste0(round(mean_value, 1), "")), # Changed x to evaluator
+      color = "black",
+      vjust = 2.0, size = 3.5
+    ) +
+    labs(title = "", x = "", y = "%", color = "") +
+    theme_bw(base_size = 16) +
+    scale_color_manual(values = my_palette, name = "") +
+    ggtitle(el) +
+    scale_y_continuous(
+      limits = c(0, 100),
+      breaks = seq(0, 100, by = 20),
+      labels = function(x) paste0(x, "")
+    ) +
+    facet_wrap(~ metric, nrow = 1) + # Changed facet to metric
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "none",
+      legend.title = element_text(size = 12),
+      legend.text = element_text(size = 12),
+      strip.text = element_text(size = 14, colour = "Black"),
+      plot.title = element_text(size = 14)
+    ) +
+    guides(
+      color = guide_legend(
+        keywidth  = unit(8, "pt"),
+        keyheight = unit(6, "pt")
+      )
+    )
+  # Save in list
+  plot_list[[i]] <- p
+  # Also create individual objects: Violin_performance_plot1 ... Violin_performance_plot7
+  assign(paste0("Violin_performance_plot", i), p, envir = .GlobalEnv)
+}
+
+# Example: show the first plot
+#Violin_performance_plot1
+# Or access by name:
+# plot_list[["land_management_practice"]]
+```
+
+## Combine plots
+```{r}
+combined_plot <- (
+  Violin_performance_plot1 + Violin_performance_plot2 + Violin_performance_plot3 +
+  Violin_performance_plot4 + Violin_performance_plot5 + Violin_performance_plot6 +
+  Violin_performance_plot7 + plot_spacer()
+) +
+  plot_layout(nrow = 4, ncol = 2) +
+  plot_annotation(
+    tag_levels = "A",
+    tag_prefix = "(",
+    tag_suffix = ")"
+  )
+
+combined_plot
+
+
+ggsave(
+  filename = file.path(folder_path_plots, "combined_Violin2.png"),
+  plot     = combined_plot,
+  width    = 14,      # adjust as needed
+  height   = 14,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+
+```
+# ...................................................................................................................................................................
+# (B) R, PR and F1 by pattern
+In part (B) we firstly calculate Recall (completeness), Precision (correctness), and the harmonic mean F1-score for the combination of the seven extraction elements (Driver, Actor, Property, Effect, Contrast, Study type and Location) by comparing LLM extraction with human extractions. Recall, Precision, and F1-score are computed for each DOI and Annotator to normalize rows per abstract. These calculations are performed separately for each Annotator and are reported as boxplots
+
+R, P and F1 calculation were done as described in part (A)
+
+## Annotator 1 versus LEPAMTIC
+```{r}
+data1$DxExAxPC <- paste(data1$land_management_practice, data1$effect, data1$actor, data1$property, data1$contrasting_land_management_practice,  data1$location_country, data1$study_type, sep = "_")
+data1$DxExAxPC <- as.factor(data1$DxExAxPC)
+data1 <- data1 %>%
+  group_by(DOI) %>%
+  mutate(Score = ifelse(Entity == "Annotator_1", score[Entity == "LLM"], score)) %>%
+  ungroup()
+scores <- data1[!duplicated(data1$DOI), c("DOI", "Score")]
+
+entity_count <- data1 %>%
+  filter(Entity %in% c("Annotator_1", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_1_count = Annotator_1,
+    LLM_count = LLM
+  )
+
+unique_levels_Annotator_1 <- data1 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_1 <- unique_levels_Annotator_1 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(LLM, Annotator_1, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_1 <- data1 %>%
+  filter(Entity %in% c("Annotator_1", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_1 <- entity_count_Annotator_1 %>%
+dplyr::rename(
+     Annotator_1_count =  Annotator_1,
+    LLM_count = LLM
+  )
+
+result_Annotator_1 <- wide_levels_Annotator_1
+result_Annotator_1 <- wide_levels_Annotator_1 %>%
+  left_join(entity_count_Annotator_1, by = "DOI")
+result_Annotator_1 <- result_Annotator_1 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_1_count) * 100)
+result_Annotator_1 <- result_Annotator_1 %>%
+  mutate(percentage_precision = ( exact_matches/ LLM_count ) * 100) %>%
+ mutate(F1 = 2 * ((percentage_precision) * (percentage_recall)) / 
+            ((percentage_precision) + (percentage_recall)))
+
+
+result_Annotator_1 <- as.data.frame(result_Annotator_1)
+result_Annotator_1 <- result_Annotator_1 %>%
+    replace_na(list(F1 = 0)) %>%
+  select(-LLM, -Annotator_1)
+
+result_Annotator_1 <- merge(scores, result_Annotator_1, by = "DOI", all = FALSE)
+result_Annotator_1$evaluator <- "Annotator_1"
+
+
+total_exact_matches <- sum(result_Annotator_1$exact_matches, na.rm = TRUE)
+total_Annotator_1 <- sum(result_Annotator_1$Annotator_1_count, na.rm = TRUE)
+total_llm <- sum(result_Annotator_1$LLM_count, na.rm = TRUE)
+
+global_recall <- (total_exact_matches / total_Annotator_1) * 100
+global_precision <- (total_exact_matches / total_llm) * 100
+global_F1 <- 2 * (global_precision * global_recall) / (global_precision + global_recall)
+
+overall_metrics_Annotator1 <- data.frame(
+  evaluator = "Annotator_1",
+  total_exact_matches = total_exact_matches,
+  total_Annotator_1 = total_Annotator_1,
+  total_llm = total_llm,
+  percentage_recall = global_recall,
+  percentage_precision = global_precision,
+  F1 = global_F1
+)
+```
+
+## Annotator 2 versus LEPAMTIC
+```{r}
+data2$DxExAxPC <- paste(data2$land_management_practice, data2$effect, data2$actor, data2$property, data2$contrasting_land_management_practice, data2$location_country, data2$study_type, sep = "_")
+data2$DxExAxPC <- as.factor(data2$DxExAxPC)
+data2 <- data2 %>%
+  group_by(DOI) %>%
+  mutate(Score = ifelse(Entity == "Annotator_2", score[Entity == "LLM"], score)) %>%
+  ungroup()
+scores <- data2[!duplicated(data2$DOI), c("DOI", "Score")]
+
+entity_count <- data2 %>%
+  filter(Entity %in% c("Annotator_2", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_2_count = Annotator_2,
+    LLM_count = LLM
+  )
+
+unique_levels_Annotator_2 <- data2 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_2 <- unique_levels_Annotator_2 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(LLM, Annotator_2, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_2 <- data2  %>%
+  filter(Entity %in% c("Annotator_2", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_2 <- entity_count_Annotator_2 %>%
+  dplyr::rename(
+     Annotator_2_count =  Annotator_2,
+    LLM_count = LLM
+  )
+
+result_Annotator_2 <- wide_levels_Annotator_2
+result_Annotator_2 <- wide_levels_Annotator_2 %>%
+  left_join(entity_count_Annotator_2, by = "DOI")
+result_Annotator_2 <- result_Annotator_2 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_2_count) * 100)
+result_Annotator_2 <- result_Annotator_2 %>%
+  mutate(percentage_precision = ( exact_matches/ LLM_count  ) * 100)%>%
+ mutate(F1 = 2 * ((percentage_precision) * (percentage_recall)) / 
+            ((percentage_precision) + (percentage_recall)))
+result_Annotator_2 <- as.data.frame(result_Annotator_2)
+result_Annotator_2 <- result_Annotator_2 %>%
+    replace_na(list(F1 = 0)) %>%
+  select(-LLM, -Annotator_2)
+
+result_Annotator_2 <- merge(scores, result_Annotator_2, by = "DOI", all = FALSE)
+result_Annotator_2$evaluator <- "Annotator_2"
+
+total_exact_matches_2 <- sum(result_Annotator_2$exact_matches, na.rm = TRUE)
+total_Annotator_2 <- sum(result_Annotator_2$Annotator_2_count, na.rm = TRUE)
+total_llm_2 <- sum(result_Annotator_2$LLM_count, na.rm = TRUE)
+
+global_recall_2 <- (total_exact_matches_2 / total_Annotator_2) * 100
+global_precision_2 <- (total_exact_matches_2 / total_llm_2) * 100
+global_F1_2 <- 2 * (global_precision_2 * global_recall_2) / (global_precision_2 + global_recall_2)
+
+overall_metrics_Annotator2 <- data.frame(
+  evaluator = "Annotator_2",
+  total_exact_matches = total_exact_matches_2,
+  total_Annotator_1 = total_Annotator_2,
+  total_llm = total_llm_2,
+  percentage_recall = global_recall_2,
+  percentage_precision = global_precision_2,
+  F1 = global_F1_2
+)
+```
+
+## Annotator 3 versus LEPAMTIC
+```{r}
+data3$DxExAxPC <- paste(data3$land_management_practice, data3$effect, data3$actor, data3$property, data3$contrasting_land_management_practice,  data3$location_country, data3$study_type,sep = "_")
+data3$DxExAxPC <- as.factor(data3$DxExAxPC)
+data3 <- data3 %>%
+  group_by(DOI) %>%
+  mutate(Score = ifelse(Entity == "Annotator_3", score[Entity == "LLM"], score)) %>%
+  ungroup()
+scores <- data3[!duplicated(data3$DOI), c("DOI", "Score")]
+
+entity_count <- data3 %>%
+  filter(Entity %in% c("Annotator_3", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_3_count = Annotator_3,
+    LLM_count = LLM
+  )
+
+unique_levels_Annotator_3 <- data3 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_3 <- unique_levels_Annotator_3 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(LLM, Annotator_3, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_3 <- data3  %>%
+  filter(Entity %in% c("Annotator_3", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_3 <- entity_count_Annotator_3 %>%
+ dplyr::rename(
+     Annotator_3_count =  Annotator_3,
+    LLM_count = LLM
+  )
+
+result_Annotator_3 <- wide_levels_Annotator_3
+result_Annotator_3 <- wide_levels_Annotator_3 %>%
+  left_join(entity_count_Annotator_3, by = "DOI")
+result_Annotator_3 <- result_Annotator_3 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_3_count) * 100)
+result_Annotator_3 <- result_Annotator_3 %>%
+  mutate(percentage_precision = ( exact_matches/ LLM_count  ) * 100)%>%
+ mutate(F1 = 2 * ((percentage_precision) * (percentage_recall)) / 
+            ((percentage_precision) + (percentage_recall)))
+result_Annotator_3 <- as.data.frame(result_Annotator_3)
+result_Annotator_3 <- result_Annotator_3 %>%
+    replace_na(list(F1 = 0)) %>%
+  select(-LLM, -Annotator_3)
+
+result_Annotator_3 <- merge(scores, result_Annotator_3, by = "DOI", all = FALSE)
+result_Annotator_3$evaluator <- "Annotator_3"
+
+total_exact_matches_3 <- sum(result_Annotator_3$exact_matches, na.rm = TRUE)
+total_Annotator_3 <- sum(result_Annotator_3$Annotator_3_count, na.rm = TRUE)
+total_llm_3 <- sum(result_Annotator_3$LLM_count, na.rm = TRUE)
+
+global_recall_3 <- (total_exact_matches_3 / total_Annotator_3) * 100
+global_precision_3 <- (total_exact_matches_3 / total_llm_3) * 100
+global_F1_3 <- 2 * (global_precision_3 * global_recall_3) / (global_precision_3 + global_recall_3)
+
+overall_metrics_Annotator3 <- data.frame(
+  evaluator = "Annotator_3",
+  total_exact_matches = total_exact_matches_3,
+  total_Annotator_1 = total_Annotator_3,
+  total_llm = total_llm_3,
+  percentage_recall = global_recall_3,
+  percentage_precision = global_precision_3,
+  F1 = global_F1_3
+)
+```
+
+## Annotator 4 versus LEPAMTIC
+```{r}
+data4$DxExAxPC <- paste(data4$land_management_practice, data4$effect, data4$actor, data4$property, data4$contrasting_land_management_practice,  data4$location_country, data4$study_type,sep = "_")
+data4$DxExAxPC <- as.factor(data4$DxExAxPC)
+data4 <- data4 %>%
+  group_by(DOI) %>%
+  mutate(Score = ifelse(Entity == "Annotator_4", score[Entity == "LLM"], score)) %>%
+  ungroup()
+scores <- data4[!duplicated(data4$DOI), c("DOI", "Score")]
+
+entity_count <- data4 %>%
+  filter(Entity %in% c("Annotator_4", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_4_count = Annotator_4,
+    LLM_count = LLM
+  )
+
+unique_levels_Annotator_4 <- data4 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_4 <- unique_levels_Annotator_4 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(LLM, Annotator_4, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_4 <- data4  %>%
+  filter(Entity %in% c("Annotator_4", "LLM")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_4 <- entity_count_Annotator_4 %>%
+  dplyr::rename(
+     Annotator_4_count =  Annotator_4,
+    LLM_count = LLM
+  )
+
+result_Annotator_4 <- wide_levels_Annotator_4
+result_Annotator_4 <- wide_levels_Annotator_4 %>%
+  left_join(entity_count_Annotator_4, by = "DOI")
+result_Annotator_4 <- result_Annotator_4 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_4_count) * 100)
+result_Annotator_4 <- result_Annotator_4 %>%
+  mutate(percentage_precision = ( exact_matches/ LLM_count  ) * 100)%>%
+ mutate(F1 = 2 * ((percentage_precision) * (percentage_recall)) / 
+            ((percentage_precision) + (percentage_recall)))
+result_Annotator_4 <- as.data.frame(result_Annotator_4)
+result_Annotator_4 <- result_Annotator_4 %>%
+    replace_na(list(F1 = 0)) %>%
+  select(-LLM, -Annotator_4)
+
+result_Annotator_4 <- merge(scores, result_Annotator_4, by = "DOI", all = FALSE)
+result_Annotator_4$evaluator <- "Annotator_4"
+
+total_exact_matches_4 <- sum(result_Annotator_4$exact_matches, na.rm = TRUE)
+total_Annotator_4 <- sum(result_Annotator_4$Annotator_4_count, na.rm = TRUE)
+total_llm_4 <- sum(result_Annotator_4$LLM_count, na.rm = TRUE)
+
+global_recall_4 <- (total_exact_matches_4 / total_Annotator_4) * 100
+global_precision_4 <- (total_exact_matches_4 / total_llm_4) * 100
+global_F1_4 <- 2 * (global_precision_4 * global_recall_4) / (global_precision_4 + global_recall_4)
+
+overall_metrics_Annotator4 <- data.frame(
+  evaluator = "Annotator_4",
+  total_exact_matches = total_exact_matches_4,
+  total_Annotator_1 = total_Annotator_4,
+  total_llm = total_llm_4,
+  percentage_recall = global_recall_4,
+  percentage_precision = global_precision_4,
+  F1 = global_F1_4
+)
+```
+
+##Combine all 
+```{r}
+result_Annotator_1 <- result_Annotator_1 %>%
+  rename(Annotator_count = Annotator_1_count)
+
+result_Annotator_2 <- result_Annotator_2 %>%
+  rename(Annotator_count = Annotator_2_count)
+
+result_Annotator_3 <- result_Annotator_3 %>%
+  rename(Annotator_count = Annotator_3_count)
+
+result_Annotator_4 <- result_Annotator_4 %>%
+  rename(Annotator_count = Annotator_4_count)
+
+results_all <- rbind(result_Annotator_1, result_Annotator_2, result_Annotator_3, result_Annotator_4)
+results_all <- results_all %>%
+  mutate(F1 = ifelse(is.nan(F1), 0, F1))
+
+```
+
+## Boxplots
+```{r}
+my_palette <- c("#B8D8D2", "#C8D9A7", "#D6A77A")
+
+# 1) Long format with renamed & ordered facets
+df_long <- results_all %>%
+  dplyr::select(evaluator, percentage_recall, percentage_precision, F1) %>%
+  tidyr::pivot_longer(
+    cols = c(percentage_recall, percentage_precision, F1),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  dplyr::mutate(
+    metric = dplyr::recode(metric,
+      percentage_precision = "P",
+      percentage_recall    = "R",
+      F1                   = "F1"
+    ),
+    metric = factor(metric, levels = c("R", "P", "F1")),
+    evaluator = stringr::str_replace(evaluator, "^Annotator[_\\s]*", "#"),
+    evaluator = stringr::str_replace_all(evaluator, "_", "")
+  )
+
+# 1) Means per evaluator & metric
+df_means <- df_long %>%
+  dplyr::group_by(evaluator, metric) %>%
+  dplyr::summarise(mean_value = mean(value, na.rm = TRUE), .groups = "drop")
+
+# 2) Plot with mean point + annotation
+boxplot <- ggplot(df_long, aes(x = evaluator, y = value)) +
+  geom_boxplot(fill = NA, color = "black", width = 0.6, outlier.shape = NA) +
+  geom_point(
+    aes(color = metric),
+    position = position_jitter(width = 0.25, height = 0),
+    size = 1.7, alpha = 0.7
+  ) +
+  # Add mean as a black dot
+  geom_point(
+    data = df_means,
+    aes(x = evaluator, y = mean_value),
+    color = "black", fill = "black",
+    shape = 21, size = 3, stroke = 0.5
+  ) +
+  # Add annotation near the mean
+  geom_text(
+    data = df_means,
+    aes(x = evaluator, y = mean_value, label = round(mean_value, 1)),
+    color = "black",
+    vjust = 2.0, size = 3.5
+  ) +
+  labs(title = "", x = "", y = "%", color = "") +
+  theme_bw(base_size = 14) +
+  scale_color_manual(values = my_palette, name = "") +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, by = 20)) +
+  facet_wrap(~ metric, nrow = 1) +
+  theme(
+    axis.text.x = ggplot2::element_text(angle = 0, hjust = 0.5, vjust = 1),
+    panel.grid.major = ggplot2::element_blank(),
+    panel.grid.minor = ggplot2::element_blank(),
+    legend.position = "none",
+    strip.text = ggplot2::element_text(size = 12, colour = "Black")
+  )
+
+boxplot
+
+ggsave(
+  filename = file.path(folder_path_plots, "P_R_F1_boxplot.png"),
+  plot     = boxplot,
+  width    = 8,      # adjust as needed
+  height   = 4,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+
+```
+# ...................................................................................................................................................................
+# (C) Overall extraction evaluation
+Here, we assess the distribution of the entire pattern (row) evaluation and identify the source of errors. Each row consists of 12 columns with extracted knowledge, of which only five are considered "key," while the others provide additional less-essential information. Each Annotator evaluated each row as either:
+
+- Correct,
+- Partially correct (meaning one or two incorrect columns),
+- Partially correct (due to undemultiplexed information), or
+- Incorrect (e.g., if the response variable was out of scope, such as soil organic carbon, or if more than 3 colums were wrong).
+
+## Extraction evaluation plot
+```{r}
+my_palette <- c(  "#C8D9A7","#A7C7B9", "#B8D8D2", "#D6A77A")
+
+data_percentage_LLM <- data_all %>%
+  dplyr::filter(Entity == "LLM") %>%
+  dplyr::group_by(evaluator, comparisons) %>%  
+  dplyr::summarise(count = n(), .groups = "drop") %>%  
+  dplyr::mutate(percentage = (count / sum(count, na.rm = TRUE)) * 100, .by = evaluator) 
+
+data_percentage_LLM <- data_percentage_LLM %>%
+    dplyr::mutate(comparisons = as.factor(comparisons)) %>%
+    dplyr::mutate(comparisons = fct_recode(comparisons,
+                                   "Incorrect" = "remove",
+                                   "All correct" = "correct",
+                                   "Partially correct (element wrong)" = "incorrect",
+                                   "Partially correct (multiplexed)" = "partially_demultiplex")) %>%
+   dplyr::mutate(
+    comparisons = factor(
+      comparisons,
+      levels = c(
+        "All correct",
+        "Partially correct (multiplexed)",
+        "Partially correct (element wrong)",
+        "Incorrect"
+      )
+    )
+  )
+# Recode your evaluator
+data_percentage_LLM <- data_percentage_LLM %>%
+    dplyr::mutate(evaluator = recode(
+    evaluator,
+    Annotator_1 = "Annotator 1",
+    Annotator_2 = "Annotator 2",
+    Annotator_3 = "Annotator 3",
+    Annotator_4 = "Annotator 4"
+  ))
+data_percentage_LLM
+
+file_path <- file.path(folder_path_tables, "Extraction_evaluation.csv")
+write.csv(data_percentage_LLM, file = file_path, row.names = FALSE)
+
+Extraction_evaluation_plot <- ggplot(data_percentage_LLM, aes(x = evaluator, y = percentage, fill = comparisons)) +
+  geom_bar(
+    stat = "identity",
+    color = "black",
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  labs(title = "", x = "", y = "", fill = "") +
+  theme_bw(base_size = 14) +
+  scale_fill_manual(values = my_palette, name = "") +
+  ggtitle("Extraction pattern assessement") +
+  scale_y_continuous(
+    labels = scales::percent_format(scale = 1),
+    breaks = seq(0, 100, 10),
+    minor_breaks = seq(0, 100, 5)
+  ) +
+  # <<< NEW: relabel x-axis >>>
+  scale_x_discrete(labels = c(
+    "Annotator 1" = "#1",
+    "Annotator 2" = "#2",
+    "Annotator 3" = "#3",
+    "Annotator 4" = "#4"
+  )) +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0.5),  # horizontal & centered
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linetype = "dotted"),
+    panel.grid.minor.y = element_line(color = "grey92", linetype = "dotted"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    strip.text = element_text(size = 12, colour = "Black"),
+    plot.title = element_text(size = 10)
+  ) +
+  guides(fill = guide_legend(keywidth = unit(8, "pt"), keyheight = unit(6, "pt")))
+
+Extraction_evaluation_plot
+
+
+ggsave(
+  filename = file.path(folder_path_plots, "Extraction_evaluation_plot.png"),
+  plot     = Extraction_evaluation_plot,
+  width    = 8,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+
+```
+To disentangle the LLM extraction errors, we show which columns have been extracted incorrectly within the partially correct (column wrong) rows, and the frequencies of each column
+
+## Erroneous  elements (within partially correct) categories plot
+```{r}
+#my_palette2 <- c( 
+#  "#F1C6C1",  "#F17C6B", "#B94C5D", "#D6A77A", 
+#  "#FE5252", "#7A2E36", "darkred", "red", "#290202")
+my_palette2 <- c(
+  "#FFE3CC",
+  "#FFD166",
+  "#F4A261",
+  "#F17C6B",
+  "#FE5252",
+  "#B94C5D",
+  "#7A2E36",
+  "darkred",
+  "#290202"
+)
+incorrect_categories_counts <- data_all %>%
+    dplyr::filter(comparisons %in% c("incorrect"))%>%  # in the excel the parially correct are called incorrect
+  pivot_longer(cols = starts_with("incorrect"), 
+               names_to = "incorrects", 
+               values_to = "level") %>%
+    dplyr::filter(!is.na(level) & level != "") %>% 
+    dplyr::count(evaluator, level, name = "count")
+
+incorrect_categories_counts
+# Recode your evaluator
+incorrect_categories_counts <- incorrect_categories_counts %>%
+    dplyr::mutate(evaluator = recode(
+    evaluator,
+    Annotator_1 = "Annotator 1",
+    Annotator_2 = "Annotator 2",
+    Annotator_3 = "Annotator 3",
+    Annotator_4 = "Annotator 4"
+  ))
+
+incorrect_categories_counts <- incorrect_categories_counts %>%
+    dplyr::mutate(
+    level = str_replace_all(level, "_", " "),  # underscores → spaces
+    level = str_to_sentence(level)              # only first letter uppercase
+  )
+
+incorrect_categories_freq <- incorrect_categories_counts %>%
+    dplyr::group_by(evaluator) %>% 
+    dplyr::mutate(
+    rel_freq = count / sum(count) * 100  # each annotator sums to 100%
+  ) %>% 
+    dplyr::ungroup()
+incorrect_categories_freq
+
+incorrect_categories_freq <- incorrect_categories_freq %>%
+    dplyr::mutate(
+    level = factor(
+      level,
+      levels = c(
+        "Land management practice",
+        "Actor",
+        "Property",
+        "Method or measurement",
+        "Contrasting land management practice",
+        "Temporal scope",
+        "Locational scope"
+      )
+    )
+  )
+incorrect_categories_freq
+
+file_path <- file.path(folder_path_tables, "Incorrect_categories_freq.csv")
+write.csv(incorrect_categories_freq, file = file_path, row.names = FALSE)
+
+Incorrect_categories_plot <- ggplot(incorrect_categories_freq, aes(x = evaluator, y = rel_freq, fill = level)) +
+  geom_bar(stat = "identity",
+           color = "black",
+           position = position_dodge(width = 0.8),
+           width = 0.7) +
+  labs(title = "", x = "", y = "", fill = "") +
+  theme_bw(base_size = 14) +
+  scale_fill_manual(values = my_palette2, name = "") +
+  ggtitle("Distribution of erroneous elements (within partially correct)") +
+  scale_y_continuous(
+    labels = scales::percent_format(scale = 1),
+    breaks  = seq(0, 100, 10),        # optional: clearer grid spacing
+    minor_breaks = seq(0, 100, 5)     # optional: light minor grids
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linetype = "dotted"),
+    panel.grid.minor.y = element_line(color = "grey92", linetype = "dotted"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    strip.text = element_text(size = 12, colour = "Black"),
+    plot.title = element_text(size = 10)
+  ) +
+  guides(fill = guide_legend(keywidth = unit(8, "pt"), keyheight = unit(6, "pt")))
+
+Incorrect_categories_plot
+
+ggsave(
+  filename = file.path(folder_path_plots, "Partially_correct_(column_wrong)_categories_plot.png"),
+  plot     = Incorrect_categories_plot,
+  width    = 8,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+Here we show the distribution of the number of columns wrong in the partially correct evaluation category
+
+## Partially_correct_(column_wrong)_number plot
+```{r}
+# a step darker (still soft, not neon)
+my_palette3 <- c("#5E93B8", "#A9CBE8", "#2C6892")
+
+
+llm_data <- data_all %>%
+    dplyr::filter(Entity == "LLM") %>%
+  droplevels()
+
+# Recode your evaluator
+llm_data <- llm_data %>%
+    dplyr::mutate(Entity = recode(
+    Entity,
+    Annotator_1 = "Annotator 1",
+    Annotator_2 = "Annotator 2",
+    Annotator_3 = "Annotator 3",
+    Annotator_4 = "Annotator 4"
+  ))
+
+incorrect_categories_subset <- llm_data %>%
+    dplyr::filter(comparisons %in% c("incorrect"))
+
+results_by_entity <- incorrect_categories_subset %>%
+    dplyr::mutate(
+    n_incorrect = rowSums(across(starts_with("incorrect_"),
+                                 ~ !is.na(.) & . != ""))
+  ) %>%
+    dplyr::group_by(evaluator, .drop = FALSE) %>%
+    dplyr::summarize(
+    `One incorrect`   = sum(n_incorrect == 1),
+    `Two incorrect`   = sum(n_incorrect == 2),
+    `Three incorrect` = sum(n_incorrect == 3),
+    .groups = "drop"
+)
+
+results_by_entity
+
+
+# columns that hold the counts (adapt if you have more)
+count_cols <- c("One incorrect", "Two incorrect", "Three incorrect")
+
+results_with_pct <- results_by_entity %>%
+    dplyr::mutate(
+    Total = rowSums(across(all_of(count_cols))),
+    across(
+      all_of(count_cols),
+      ~ if_else(Total > 0, . / Total, NA_real_),   # proportions 0–1
+      .names = "{.col}_prop"
+    )
+  ) %>%
+    dplyr::mutate(
+    across(ends_with("_prop"), ~ round(. * 100, 1), .names = "{.col}_pct") # 0–100
+  )
+
+# (optional) keep a tidy order
+results_with_pct <- results_with_pct %>%
+    dplyr::select(evaluator, Total, all_of(count_cols), ends_with("_pct"))
+results_with_pct
+
+file_path <- file.path(folder_path_tables, "Partially_correct_(column_wrong)_number.csv")
+write.csv(results_with_pct, file = file_path, row.names = FALSE)
+
+plot_df <- results_with_pct %>%
+    dplyr::select(evaluator, Total, `One incorrect`, `Two incorrect`, `Three incorrect`) %>%
+  pivot_longer(cols = c(`One incorrect`, `Two incorrect`, `Three incorrect`),
+               names_to = "level", values_to = "count") %>%
+    dplyr::mutate(
+    pct = if_else(Total > 0, count / Total * 100, NA_real_),
+    level = factor(level, levels = c("One incorrect", "Two incorrect", "Three incorrect"))
+  ) %>%
+    dplyr::select(-count)
+
+Incorrect_categories_plot2 <- ggplot(plot_df, aes(x = evaluator, y = pct, fill = level)) +
+  geom_bar(
+    stat = "identity",
+    color = "black",
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  labs(title = "", x = "", y = "", fill = "") +
+  theme_bw(base_size = 14) +
+  scale_fill_manual(values = my_palette3, name = "") +
+  scale_y_continuous(
+    limits = c(0, 100),
+    labels = scales::percent_format(scale = 1),
+    breaks = seq(0, 100, 25),      # major grid spacing
+    minor_breaks = seq(0, 100, 5), # minor grid spacing
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  ggtitle("Number of incorrect elements (within partially correct)") +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linetype = "dotted"),
+    panel.grid.minor.y = element_line(color = "grey92", linetype = "dotted"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    strip.text = element_text(size = 12, colour = "Black"),
+    plot.title = element_text(size = 10)
+  ) +
+  guides(fill = guide_legend(keywidth = unit(8, "pt"), keyheight = unit(6, "pt")))
+
+Incorrect_categories_plot2
+
+ggsave(
+  filename = file.path(folder_path_plots, "Partially_correct_(column_wrong)_number_plot.png"),
+  plot     = Incorrect_categories_plot2,
+  width    = 8,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+## Combined plots
+```{r}
+library(ggplot2)
+library(ggpubr)
+
+# Define new labels
+new_labels <- c("#1", "#2", "#3", "#4")
+
+# Apply new x-axis labels + keep them horizontal
+Extraction_evaluation_plot <- Extraction_evaluation_plot +
+  scale_x_discrete(labels = new_labels) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+Incorrect_categories_plot2 <- Incorrect_categories_plot2 +
+  scale_x_discrete(labels = new_labels) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+Incorrect_categories_plot <- Incorrect_categories_plot +
+  scale_x_discrete(labels = new_labels) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+
+# Arrange and save
+ggsave(
+  plot = ggarrange(
+    Extraction_evaluation_plot,
+    Incorrect_categories_plot2,
+    Incorrect_categories_plot,
+    common.legend = FALSE,
+    legend = "right",
+    nrow = 3,
+    ncol = 1,
+    labels = c("(A)", "(B)", "(C)"),
+    align = "v",
+    font.label = list(size = 10, color = "black", face = "plain")  # face = "bold"/"italic"/"plain"
+  ),
+  filename = file.path(folder_path_plots, "Error_characterisation.png"),
+  width = 6, height = 7, bg = "white"
+)
+```
+# .......................................................................................................
+# (D) Unification evaluation
+
+## LEPAMTIC_V3
+Here, we evaluate the LLM unification step with LEPAMTIC_V3, in which the model aligns extracted information with a predefined list of terms. This step is crucial for enabling the subsequent summarization and aggregation of structured knowledge for downstream analysis.
+
+```{r}
+levels(data_all$property_evaluation)
+```
+```{r}
+levels(data_all$actor_evaluation)
+```
+```{r}
+levels(data_all$contrast_evaluation)
+```
+
+```{r}
+levels(data_all$practice_evaluation)
+levels(data_all$actor_evaluation)
+levels(data_all$property_evaluation)
+levels(data_all$contrast_evaluation)
+data_percentage_LLM_unification <- data_all %>%
+  mutate(across(c(practice_evaluation, actor_evaluation, property_evaluation, contrast_evaluation), ~ fct_recode(.,
+                                   "Multiple correct" = "multiple correct",
+                                   "Multiple correct" = "multiple_correct",
+                                   "One correct" = "one correct",
+                                   "One correct" = "one_correct",
+                                   "Correct"= "corrcet",
+                                   "Correct"= "correct",
+                                   "Incorrect" = "incorrect"))) %>%
+  filter(Entity == "LLM") %>%
+  pivot_longer(cols = c(practice_evaluation, actor_evaluation, property_evaluation, contrast_evaluation), 
+               names_to = "unification", values_to = "evaluation") %>%
+  group_by(evaluator, unification, evaluation) %>%  
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(unification, evaluator) %>% 
+  mutate(percentage = (count / sum(count)) * 100) %>%  
+  ungroup()
+
+# Recode your evaluator
+data_percentage_LLM_unification <- data_percentage_LLM_unification %>%
+  mutate(evaluator = recode(
+    evaluator,
+    Annotator_1 = "#1",
+    Annotator_2 = "#2",
+    Annotator_3 = "#3",
+    Annotator_4 = "#4"
+  ))
+data_percentage_LLM_unification
+
+file_path <- file.path(folder_path_tables, "unification.csv")
+write.csv(data_percentage_LLM_unification, file = file_path, row.names = FALSE)
+
+percentage_check <- data_percentage_LLM_unification %>%
+  group_by(evaluator, unification) %>%  
+  summarise(total_percentage = sum(percentage), .groups = "drop")
+percentage_check
+```
+
+```{r}
+my_palette <- c("#C8D9A7",  "#A7C7B9", "#B8D8D2", "#D6A77A")
+
+data_percentage_LLM_unification$unification <- factor(
+  data_percentage_LLM_unification$unification, 
+  levels = c("practice_evaluation", "actor_evaluation", "property_evaluation","contrast_evaluation"),
+  labels = c("Land managment practice" = "Land managment\npractice", "Actor", "Property", "Contrasting land management practice" = "Contrasting land\nmanagement practice")
+)
+
+data_percentage_LLM_unification2 <- data_percentage_LLM_unification %>%
+  mutate(
+    evaluation = factor(
+      evaluation,
+      levels = c(
+        "Correct",
+        "Multiple correct",
+        "One correct",
+        "Incorrect"
+      )
+    )
+  )
+data_percentage_LLM_unification2
+
+LLM_unification_plot <- ggplot(
+  data_percentage_LLM_unification2,
+  aes(x = evaluator, y = percentage, fill = evaluation)
+) +
+  geom_bar(
+    stat = "identity",
+    color = "black",
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  labs(title = NULL, x = "", y = "", fill = "") +
+  theme_bw(base_size = 16) +
+  scale_fill_manual(
+    values = my_palette,
+    name = "",
+    guide = guide_legend(title.position = "top")
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(scale = 1),
+    breaks = seq(0, 100, 25),      # major grid spacing
+    minor_breaks = seq(0, 100, 5)  # minor grid spacing
+  ) +
+  theme(
+    axis.text.x        = element_text(angle = 0, hjust = 0.5, vjust = 1),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linetype = "dotted"),
+    panel.grid.minor.y = element_line(color = "grey92", linetype = "dotted"),
+    legend.position    = "bottom",
+    legend.direction   = "horizontal",
+    legend.box         = "vertical",
+    legend.title       = element_blank(),
+    legend.title.align = 0.5,
+    legend.text        = element_text(size = 12),
+    strip.text         = element_text(size = 12, colour = "black")
+  ) +
+  facet_wrap(~ unification, nrow = 1)
+
+
+LLM_unification_plot
+
+ggsave(
+  filename = file.path(folder_path_plots, "LLM_unification_plot.png"),
+  plot     = LLM_unification_plot,
+  width    = 10,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+## LEPAMTIC_V6
+A new evaluation of the unification step was done with the final version of LEPAMTIC (LEPAMTIC_V6) to assess if the final changes in the prompt chain aftected the quality of this step. Only one evaluator (annotator_2) was considered
+
+## Load data
+```{r}
+data_V6 <- read_excel("40_abstracts_evaluation.xlsx", sheet = "Annotator_2_V6")
+#data2 <- read.csv("LLM_final_extraction_RL_V3_corrected.csv", header = TRUE,sep=',')
+#data3 <- read.csv("LLM_final_extraction_CI-11-02-25_v2_corrected.csv", header = TRUE,sep=';')
+#data4 <- read.csv("LLM_final_extractioncomplete_FD_corrected.csv", header = TRUE,sep=';')
+```
+
+
+
+```{r}
+data_V6 <- data_V6 %>% 
+  mutate(across(everything(), as.factor))
+levels(data_V6$practice_evaluation)
+levels(data_V6$actor_evaluation)
+levels(data_V6$property_evaluation)
+levels(data_V6$contrast_evaluation)
+data_percentage_LLM_unification <- data_V6 %>%
+  mutate(across(c(practice_evaluation, actor_evaluation, property_evaluation, contrast_evaluation), ~ fct_recode(.,
+                                   "Multiple correct" = "multiple_correct",
+                                   "One correct" = "one_correct",
+                                   "Correct"= "correct",
+                                   "Incorrect" = "incorrect"))) %>%
+  pivot_longer(cols = c(practice_evaluation, actor_evaluation, property_evaluation, contrast_evaluation), 
+               names_to = "unification", values_to = "evaluation") %>%
+  group_by(Evaluator, unification, evaluation) %>%  
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(unification, Evaluator) %>% 
+  mutate(percentage = (count / sum(count)) * 100) %>%  
+  ungroup()
+
+# Recode your evaluator
+data_percentage_LLM_unification <- data_percentage_LLM_unification %>%
+  mutate(evaluator = recode(
+    Evaluator,
+    Annotator_2 = "#2"
+  ))
+data_percentage_LLM_unification
+
+file_path <- file.path(folder_path_tables, "unification_V6.csv")
+write.csv(data_percentage_LLM_unification, file = file_path, row.names = FALSE)
+
+percentage_check <- data_percentage_LLM_unification %>%
+  group_by(evaluator, unification) %>%  
+  summarise(total_percentage = sum(percentage), .groups = "drop")
+percentage_check
+```
+
+```{r}
+my_palette <- c("#C8D9A7",  "#A7C7B9", "#B8D8D2", "#D6A77A")
+
+data_percentage_LLM_unification$unification <- factor(
+  data_percentage_LLM_unification$unification, 
+  levels = c("practice_evaluation", "actor_evaluation", "property_evaluation","contrast_evaluation"),
+  labels = c("Land managment practice" = "Land managment\npractice", "Actor", "Property", "Contrasting land management practice" = "Contrasting land\nmanagement practice")
+)
+
+data_percentage_LLM_unification2 <- data_percentage_LLM_unification %>%
+  mutate(
+    evaluation = factor(
+      evaluation,
+      levels = c(
+        "Correct",
+        "Multiple correct",
+        "One correct",
+        "Incorrect"
+      )
+    )
+  )
+data_percentage_LLM_unification2
+
+LLM_unification_plot <- ggplot(
+  data_percentage_LLM_unification2,
+  aes(x = evaluator, y = percentage, fill = evaluation)
+) +
+  geom_bar(
+    stat = "identity",
+    color = "black",
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  labs(title = NULL, x = "", y = "", fill = "") +
+  theme_bw(base_size = 16) +
+  scale_fill_manual(
+    values = my_palette,
+    name = "",
+    guide = guide_legend(title.position = "top")
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(scale = 1),
+    breaks = seq(0, 100, 25),      # major grid spacing
+    minor_breaks = seq(0, 100, 5)  # minor grid spacing
+  ) +
+  theme(
+    axis.text.x        = element_text(angle = 0, hjust = 0.5, vjust = 1),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linetype = "dotted"),
+    panel.grid.minor.y = element_line(color = "grey92", linetype = "dotted"),
+    legend.position    = "bottom",
+    legend.direction   = "horizontal",
+    legend.box         = "vertical",
+    legend.title       = element_blank(),
+    legend.title.align = 0.5,
+    legend.text        = element_text(size = 12),
+    strip.text         = element_text(size = 12, colour = "black")
+  ) +
+  facet_wrap(~ unification, nrow = 1)
+
+
+LLM_unification_plot
+
+ggsave(
+  filename = file.path(folder_path_plots, "LLM_unification_plot_V6.png"),
+  plot     = LLM_unification_plot,
+  width    = 10,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+# .......................................................................................................
+# (E) Inter-annotator agreement (IAA)
+
+We calculate precision, recall, and F1 scores, along with their means and medians, to assess inter-annotator agreement. The four Annotators calibrated themselves using a guidebook (Expert extraction guidelines).Recall, Precision, and F1-score are computed for each DOI and Annotator to normalize rows per abstract.
+
+R, P and F1 calculation were done as described in part (A)
+
+```{r}
+data_all_sci <- data_all %>%  
+  group_by(DOI) %>%
+  mutate(score = if_else(Entity != "LLM",
+                         score[Entity == "LLM"][1],  # Take the first LLM score
+                         score)) %>%  
+  ungroup()
+
+
+  data_all_sci <- data_all_sci%>% filter(Entity != "LLM")%>%
+  droplevels()
+data_all_sci$DxExAxPC <- paste(data_all_sci$land_management_practice, data_all_sci$effect, data_all_sci$actor, data_all_sci$property, data_all_sci$contrasting_land_management_practice,  data_all_sci$location_country, data_all_sci$study_type, sep = "_")
+data_all_sci$DxExAxPC <- as.factor(data_all_sci$DxExAxPC)
+```
+```{r}
+Annotators <- unique(data_all_sci$Entity)
+# Generate all unique combinations of 2 Annotators
+Annotator_pairs <- combn(Annotators, 2, simplify = FALSE)
+```
+
+```{r}
+ data_all_sci$Entity <- as.character(data_all_sci$Entity)
+data_all_sci <- data_all_sci %>%
+  mutate(DxExAxPC = paste(land_management_practice, effect, actor, property,
+                           contrasting_land_management_practice, location_country,
+                           study_type, sep = "_"))
+
+data_all_sci_1_2 <- data_all_sci %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_2")) %>%
+  droplevels()
+
+data_all_sci_1_3 <- data_all_sci %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_3")) %>%
+  droplevels()
+
+data_all_sci_1_4 <- data_all_sci %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_4")) %>%
+  droplevels()
+
+data_all_sci_2_3 <- data_all_sci %>%
+  filter(Entity %in% c("Annotator_2", "Annotator_3")) %>%
+  droplevels()
+
+data_all_sci_2_4 <- data_all_sci %>%
+  filter(Entity %in% c("Annotator_2", "Annotator_4")) %>%
+  droplevels()
+
+data_all_sci_3_4 <- data_all_sci %>%
+  filter(Entity %in% c("Annotator_3", "Annotator_4")) %>%
+  droplevels()
+```
+
+## Annotator 1 versus Annotator 2
+```{r}
+data_all_sci_1_2$DxExAxPC <- paste(data_all_sci_1_2$land_management_practice, data_all_sci_1_2$effect, data_all_sci_1_2$actor, data_all_sci_1_2$property, data_all_sci_1_2$contrasting_land_management_practice,  data_all_sci_1_2$location_country, data_all_sci_1_2$study_type, sep = "_")
+data_all_sci_1_2$DxExAxPC <- as.factor(data_all_sci_1_2$DxExAxPC)
+
+
+entity_count <- data_all_sci_1_2 %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_2")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_1_count = Annotator_1,
+    Annotator_2_count = Annotator_2
+  )
+
+unique_levels_Annotator_1 <- data_all_sci_1_2 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_1 <- unique_levels_Annotator_1 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(Annotator_2, Annotator_1, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_1 <- data_all_sci_1_2 %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_2")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_1 <- entity_count_Annotator_1 %>%
+  dplyr::rename(
+     Annotator_1_count =  Annotator_1,
+    Annotator_2_count = Annotator_2
+  )
+
+result_Annotator_1_vs_2 <- wide_levels_Annotator_1
+result_Annotator_1_vs_2 <- wide_levels_Annotator_1 %>%
+  left_join(entity_count_Annotator_1, by = "DOI")
+result_Annotator_1_vs_2 <- result_Annotator_1_vs_2 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_1_count) * 100)
+result_Annotator_1_vs_2 <- result_Annotator_1_vs_2 %>%
+  mutate(percentage_precision = ( exact_matches/ Annotator_2_count ) * 100) %>%
+mutate(F1 = ifelse(
+  is.nan(2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)),
+  0,
+  2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)
+))
+
+result_Annotator_1_vs_2 <- as.data.frame(result_Annotator_1_vs_2)
+result_Annotator_1_vs_2 <- result_Annotator_1_vs_2 %>%
+  select(-Annotator_2, -Annotator_1)
+
+result_Annotator_1_vs_2 <- merge(scores, result_Annotator_1_vs_2, by = "DOI", all = FALSE)
+result_Annotator_1_vs_2$annotator <- "Annotator_1_vs_2"
+
+mean_F1_Annotator_1_vs_2  <- mean(result_Annotator_1_vs_2$F1, na.rm = TRUE)
+median_F1_Annotator_1_vs_2  <- median(result_Annotator_1_vs_2$F1, na.rm = TRUE)
+
+```
+
+## Annotator 1 versus Annotator 3
+```{r}
+data_all_sci_1_3$DxExAxPC <- paste(data_all_sci_1_3$land_management_practice, data_all_sci_1_3$effect, data_all_sci_1_3$actor, data_all_sci_1_3$property, data_all_sci_1_3$contrasting_land_management_practice,  data_all_sci_1_3$location_country, data_all_sci_1_3$study_type, sep = "_")
+data_all_sci_1_3$DxExAxPC <- as.factor(data_all_sci_1_3$DxExAxPC)
+
+
+entity_count <- data_all_sci_1_3 %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_3")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_1_count = Annotator_1,
+    Annotator_3_count = Annotator_3
+  )
+
+unique_levels_Annotator_1 <- data_all_sci_1_3 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_1 <- unique_levels_Annotator_1 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(Annotator_3, Annotator_1, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_1 <- data_all_sci_1_3 %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_3")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_1 <- entity_count_Annotator_1 %>%
+  dplyr::rename(
+     Annotator_1_count =  Annotator_1,
+    Annotator_3_count = Annotator_3
+  )
+
+result_Annotator_1_vs_3 <- wide_levels_Annotator_1
+result_Annotator_1_vs_3 <- wide_levels_Annotator_1 %>%
+  left_join(entity_count_Annotator_1, by = "DOI")
+result_Annotator_1_vs_3 <- result_Annotator_1_vs_3 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_1_count) * 100)
+result_Annotator_1_vs_3 <- result_Annotator_1_vs_3 %>%
+  mutate(percentage_precision = ( exact_matches/ Annotator_3_count ) * 100) %>%
+mutate(F1 = ifelse(
+  is.nan(2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)),
+  0,
+  2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)
+))
+
+result_Annotator_1_vs_3 <- as.data.frame(result_Annotator_1_vs_3)
+result_Annotator_1_vs_3 <- result_Annotator_1_vs_3 %>%
+  select(-Annotator_3, -Annotator_1)
+
+result_Annotator_1_vs_3 <- merge(scores, result_Annotator_1_vs_3, by = "DOI", all = FALSE)
+result_Annotator_1_vs_3$annotator <- "Annotator_1_vs_3"
+
+mean_F1_Annotator_1_vs_3  <- mean(result_Annotator_1_vs_3$F1, na.rm = TRUE)
+median_F1_Annotator_1_vs_3  <- median(result_Annotator_1_vs_3$F1, na.rm = TRUE)
+
+```
+
+## Annotator 1 versus Annotator 4
+```{r}
+data_all_sci_1_4$DxExAxPC <- paste(data_all_sci_1_4$land_management_practice, data_all_sci_1_4$effect, data_all_sci_1_4$actor, data_all_sci_1_4$property, data_all_sci_1_4$contrasting_land_management_practice,  data_all_sci_1_4$location_country, data_all_sci_1_4$study_type, sep = "_")
+data_all_sci_1_4$DxExAxPC <- as.factor(data_all_sci_1_4$DxExAxPC)
+
+
+entity_count <- data_all_sci_1_4 %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_4")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_1_count = Annotator_1,
+    Annotator_4_count = Annotator_4
+  )
+
+unique_levels_Annotator_1 <- data_all_sci_1_4 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_1 <- unique_levels_Annotator_1 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(Annotator_4, Annotator_1, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_1 <- data_all_sci_1_4 %>%
+  filter(Entity %in% c("Annotator_1", "Annotator_4")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_1 <- entity_count_Annotator_1 %>%
+  dplyr::rename(
+     Annotator_1_count =  Annotator_1,
+    Annotator_4_count = Annotator_4
+  )
+
+result_Annotator_1_vs_4 <- wide_levels_Annotator_1
+result_Annotator_1_vs_4 <- wide_levels_Annotator_1 %>%
+  left_join(entity_count_Annotator_1, by = "DOI")
+result_Annotator_1_vs_4 <- result_Annotator_1_vs_4 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_1_count) * 100)
+result_Annotator_1_vs_4 <- result_Annotator_1_vs_4 %>%
+  mutate(percentage_precision = ( exact_matches/ Annotator_4_count ) * 100) %>%
+mutate(F1 = ifelse(
+  is.nan(2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)),
+  0,
+  2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)
+))
+
+result_Annotator_1_vs_4 <- as.data.frame(result_Annotator_1_vs_4)
+result_Annotator_1_vs_4 <- result_Annotator_1_vs_4 %>%
+  select(-Annotator_4, -Annotator_1)
+
+result_Annotator_1_vs_4 <- merge(scores, result_Annotator_1_vs_4, by = "DOI", all = FALSE)
+result_Annotator_1_vs_4$annotator <- "Annotator_1_vs_4"
+
+mean_F1_Annotator_1_vs_4  <- mean(result_Annotator_1_vs_4$F1, na.rm = TRUE)
+median_F1_Annotator_1_vs_4  <- median(result_Annotator_1_vs_4$F1, na.rm = TRUE)
+
+```
+
+## Annotator 2 versus Annotator 3
+```{r}
+data_all_sci_2_3$DxExAxPC <- paste(data_all_sci_2_3$land_management_practice, data_all_sci_2_3$effect, data_all_sci_2_3$actor, data_all_sci_2_3$property, data_all_sci_2_3$contrasting_land_management_practice,  data_all_sci_2_3$location_country, data_all_sci_2_3$study_type, sep = "_")
+data_all_sci_2_3$DxExAxPC <- as.factor(data_all_sci_2_3$DxExAxPC)
+
+
+entity_count <- data_all_sci_2_3 %>%
+  filter(Entity %in% c("Annotator_2", "Annotator_3")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_2_count = Annotator_2,
+    Annotator_3_count = Annotator_3
+  )
+
+unique_levels_Annotator_2 <- data_all_sci_2_3 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_2 <- unique_levels_Annotator_2 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(Annotator_3, Annotator_2, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_2 <- data_all_sci_2_3 %>%
+  filter(Entity %in% c("Annotator_2", "Annotator_3")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_2 <- entity_count_Annotator_2 %>%
+  dplyr::rename(
+     Annotator_2_count =  Annotator_2,
+    Annotator_3_count = Annotator_3
+  )
+
+result_Annotator_2_vs_3 <- wide_levels_Annotator_2
+result_Annotator_2_vs_3 <- wide_levels_Annotator_2 %>%
+  left_join(entity_count_Annotator_2, by = "DOI")
+result_Annotator_2_vs_3 <- result_Annotator_2_vs_3 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_2_count) * 100)
+result_Annotator_2_vs_3 <- result_Annotator_2_vs_3 %>%
+  mutate(percentage_precision = ( exact_matches/ Annotator_3_count ) * 100) %>%
+mutate(F1 = ifelse(
+  is.nan(2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)),
+  0,
+  2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)
+))
+
+result_Annotator_2_vs_3 <- as.data.frame(result_Annotator_2_vs_3)
+result_Annotator_2_vs_3 <- result_Annotator_2_vs_3 %>%
+  select(-Annotator_3, -Annotator_2)
+
+result_Annotator_2_vs_3 <- merge(scores, result_Annotator_2_vs_3, by = "DOI", all = FALSE)
+result_Annotator_2_vs_3$annotator <- "Annotator_2_vs_3"
+
+mean_F1_Annotator_2_vs_3  <- mean(result_Annotator_2_vs_3$F1, na.rm = TRUE)
+median_F1_Annotator_2_vs_3  <- median(result_Annotator_2_vs_3$F1, na.rm = TRUE)
+
+```
+
+## Annotator 2 versus Annotator 4
+```{r}
+data_all_sci_2_4$DxExAxPC <- paste(data_all_sci_2_4$land_management_practice, data_all_sci_2_4$effect, data_all_sci_2_4$actor, data_all_sci_2_4$property, data_all_sci_2_4$contrasting_land_management_practice,  data_all_sci_2_4$location_country, data_all_sci_2_4$study_type, sep = "_")
+data_all_sci_2_4$DxExAxPC <- as.factor(data_all_sci_2_4$DxExAxPC)
+
+
+entity_count <- data_all_sci_2_4 %>%
+  filter(Entity %in% c("Annotator_2", "Annotator_4")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_2_count = Annotator_2,
+    Annotator_4_count = Annotator_4
+  )
+
+unique_levels_Annotator_2 <- data_all_sci_2_4 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_2 <- unique_levels_Annotator_2 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(Annotator_4, Annotator_2, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_2 <- data_all_sci_2_4 %>%
+  filter(Entity %in% c("Annotator_2", "Annotator_4")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_2 <- entity_count_Annotator_2 %>%
+  dplyr::rename(
+     Annotator_2_count =  Annotator_2,
+    Annotator_4_count = Annotator_4
+  )
+
+result_Annotator_2_vs_4 <- wide_levels_Annotator_2
+result_Annotator_2_vs_4 <- wide_levels_Annotator_2 %>%
+  left_join(entity_count_Annotator_2, by = "DOI")
+result_Annotator_2_vs_4 <- result_Annotator_2_vs_4 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_2_count) * 100)
+result_Annotator_2_vs_4 <- result_Annotator_2_vs_4 %>%
+  mutate(percentage_precision = ( exact_matches/ Annotator_4_count ) * 100) %>%
+mutate(F1 = ifelse(
+  is.nan(2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)),
+  0,
+  2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)
+))
+
+result_Annotator_2_vs_4 <- as.data.frame(result_Annotator_2_vs_4)
+result_Annotator_2_vs_4 <- result_Annotator_2_vs_4 %>%
+  select(-Annotator_4, -Annotator_2)
+
+result_Annotator_2_vs_4 <- merge(scores, result_Annotator_2_vs_4, by = "DOI", all = FALSE)
+result_Annotator_2_vs_4$annotator <- "Annotator_2_vs_4"
+
+mean_F1_Annotator_2_vs_4  <- mean(result_Annotator_2_vs_4$F1, na.rm = TRUE)
+median_F1_Annotator_2_vs_4  <- median(result_Annotator_2_vs_4$F1, na.rm = TRUE)
+
+```
+## Annotator 3 versus Annotator 4
+```{r}
+data_all_sci_3_4$DxExAxPC <- paste(data_all_sci_3_4$land_management_practice, data_all_sci_3_4$effect, data_all_sci_3_4$actor, data_all_sci_3_4$property, data_all_sci_3_4$contrasting_land_management_practice,  data_all_sci_3_4$location_country, data_all_sci_3_4$study_type, sep = "_")
+data_all_sci_3_4$DxExAxPC <- as.factor(data_all_sci_3_4$DxExAxPC)
+
+
+entity_count <- data_all_sci_3_4 %>%
+  filter(Entity %in% c("Annotator_3", "Annotator_4")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+
+entity_count <- entity_count %>%
+  dplyr::rename(
+    Annotator_3_count = Annotator_3,
+    Annotator_4_count = Annotator_4
+  )
+
+unique_levels_Annotator_3 <- data_all_sci_3_4 %>%
+  group_by(DOI, Entity, DxExAxPC) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  select(DOI, Entity, DxExAxPC) %>%
+  distinct()
+wide_levels_Annotator_3 <- unique_levels_Annotator_3 %>%
+  pivot_wider(names_from = Entity, values_from = DxExAxPC, values_fn = list) %>%
+  mutate(exact_matches = map2_int(Annotator_4, Annotator_3, ~length(intersect(.x, .y))))
+
+entity_count_Annotator_3 <- data_all_sci_3_4 %>%
+  filter(Entity %in% c("Annotator_3", "Annotator_4")) %>%
+  group_by(DOI, Entity) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Entity, values_from = count, values_fill = list(count = 0))
+entity_count_Annotator_3 <- entity_count_Annotator_3 %>%
+  dplyr::rename(
+     Annotator_3_count =  Annotator_3,
+    Annotator_4_count = Annotator_4
+  )
+
+result_Annotator_3_vs_4 <- wide_levels_Annotator_3
+result_Annotator_3_vs_4 <- wide_levels_Annotator_3 %>%
+  left_join(entity_count_Annotator_3, by = "DOI")
+result_Annotator_3_vs_4 <- result_Annotator_3_vs_4 %>%
+  mutate(percentage_recall = ( exact_matches /Annotator_3_count) * 100)
+result_Annotator_3_vs_4 <- result_Annotator_3_vs_4 %>%
+  mutate(percentage_precision = ( exact_matches/ Annotator_4_count ) * 100) %>%
+mutate(F1 = ifelse(
+  is.nan(2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)),
+  0,
+  2 * (percentage_precision * percentage_recall) / (percentage_precision + percentage_recall)
+))
+
+result_Annotator_3_vs_4 <- as.data.frame(result_Annotator_3_vs_4)
+result_Annotator_3_vs_4 <- result_Annotator_3_vs_4 %>%
+  select(-Annotator_4, -Annotator_3)
+
+result_Annotator_3_vs_4 <- merge(scores, result_Annotator_3_vs_4, by = "DOI", all = FALSE)
+result_Annotator_3_vs_4$annotator <- "Annotator_3_vs_4"
+
+mean_F1_Annotator_3_vs_4  <- mean(result_Annotator_3_vs_4$F1, na.rm = TRUE)
+median_F1_Annotator_3_vs_4  <- median(result_Annotator_3_vs_4$F1, na.rm = TRUE)
+
+```
+
+### Summary table
+```{r}
+combined_results <- bind_rows(
+  result_Annotator_1_vs_2,
+  result_Annotator_1_vs_3, 
+  result_Annotator_1_vs_4 ,
+  result_Annotator_2_vs_3 ,
+  result_Annotator_2_vs_4 ,
+  result_Annotator_3_vs_4 )
+
+IIA_results <- combined_results %>%
+   group_by(annotator) %>%
+   summarise(
+     precision_mean = mean(percentage_precision, na.rm = TRUE),
+     recall_mean = mean(percentage_recall, na.rm = TRUE), 
+     F1_mean = mean(F1, na.rm = TRUE),
+     precision_median = median(percentage_precision, na.rm = TRUE),
+     recall_median = median(percentage_recall, na.rm = TRUE), 
+     F1_median = median(F1, na.rm = TRUE),
+     .groups = "drop"
+   )
+
+IIA_results2 <- combined_results %>%
+  group_by(annotator) %>%
+  summarise(
+    F1_mean = mean(F1, na.rm = TRUE),
+    F1_median = median(F1, na.rm = TRUE),
+    .groups = "drop"
+  )
+IIA_results
+kable(IIA_results, caption = "IAA")
+
+IIA_results2
+kable(IIA_results2, caption = "IAA")
+```
+### Edit table
+```{r}
+# transform in a clean table
+gt_tbl <- gt(IIA_results)
+
+gt_tbl %>%
+  # 1) Change font family & size for the whole table
+  tab_options(
+    table.font.names    = "Times New Roman",  # font family
+    table.font.size     = px(12)              # base font size
+  ) %>%
+  
+  # 2) Per-column or whole-table alignment
+  cols_align(
+    align = "center",          # "left", "center", or "right"
+    columns = everything()     # you can target specific cols, e.g. vars(Annotator, Value)
+  )
+# Show the gt Table
+gt_tbl
+
+# Example: save your gt table as a PDF inside that folder
+gtsave(gt_tbl, file.path(folder_path_tables, "IIA_results.rtf"))
+
+```
+
+
+
+

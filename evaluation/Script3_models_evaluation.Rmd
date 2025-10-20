@@ -1,0 +1,924 @@
+---
+title: "Script 3 - models evaluation"
+author: "Martina Lori & Ricardo Leitão"
+date: "2025-08-10"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This document contains the R script for the  **models evaluation** of the paper "Large Language Models as Rapid Evidence Synthesis Tools in Soil Ecology". The goal is to assess the performance of alternative LLMs through an objective quantitative analysis an LLM-based subjective evaluation.
+The **Part A** was dedicated to an objective quantitative analysis that measured the number and variability of extracted patterns and the categorical diversity across key extraction elements while **Part B** comprised an LLM-based subjective evaluation in which Gemini 2.0 generated detailed reports that were then synthesized to compare each model's output with human extractions.
+
+# Load libraries
+```{r}
+library(gridExtra)
+library(ggthemr)
+library(ggh4x)
+library(circlize)
+library(ggplot2)
+library(kableExtra)
+library(tidyverse)
+library(RColorBrewer)
+library(colorspace)
+library(ellmer)
+library(cowplot)
+library(dplyr)
+```
+# set theme
+```{r}
+ggthemr('dust')
+```
+
+# Define folder_paths
+```{r}
+# Define the path
+folder_path_tables <- "tables"
+
+# Create the directory if it doesn't already exist
+if (!dir.exists(folder_path_tables)) {
+  dir.create(folder_path_tables)
+}
+
+# Define the path
+folder_path_plots <- "plots"
+
+# Create the directory if it doesn't already exist
+if (!dir.exists(folder_path_plots)) {
+  dir.create(folder_path_plots)
+}
+```
+
+# Load and prepare data
+```{r}
+gpt_4o <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "gpt-4o")
+gemini <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "gemini-2.0-flash")
+o3 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "o3")
+o4_mini <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "o4-mini")
+gpt_4.1 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "gpt-4.1")
+Annotator1 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_1")
+Annotator2 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_2")
+Annotator3 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_3")
+Annotator4 <- read_excel("SI File 4 - LLM and expert extractions.xlsx", sheet = "Annotator_4")
+```
+
+```{r}
+gpt_4o <- gpt_4o %>%
+  mutate(Entity = "gpt_4o")
+
+gemini <- gemini %>%
+  mutate(Entity = "gemini")
+
+o3 <- o3 %>%
+  mutate(Entity = "o3")
+
+o4_mini <- o4_mini %>%
+  mutate(Entity = "o4_mini")
+
+gpt_4.1 <- gpt_4.1 %>%
+  mutate(Entity = "gpt_4.1")
+
+Annotator1 <- Annotator1 %>%
+  filter(Entity != "LLM") %>%
+  dplyr::select(all_of(intersect(names(.), names(gpt_4o)))) %>%
+  mutate(comment = NA_character_) %>%
+  mutate(Entity = fct_recode(Entity,
+                    "Annotator_1" = "Martina"))
+
+Annotator2 <- Annotator2 %>%
+  filter(Entity != "LLM") %>%
+  dplyr::select(all_of(intersect(names(.), names(gpt_4o)))) %>%
+  mutate(comment = NA_character_) %>%
+  mutate(Entity = fct_recode(Entity,
+                    "Annotator_2" = "RL"))
+
+Annotator3 <- Annotator3 %>%
+  filter(Entity != "LLM") %>%
+  dplyr::select(all_of(intersect(names(.), names(gpt_4o)))) %>%
+  mutate(comment = NA_character_) %>%
+  mutate(Entity = fct_recode(Entity,
+                    "Annotator_3" = "CI"))
+
+Annotator4 <- Annotator4 %>%
+  filter(Entity != "LLM") %>%
+  dplyr::select(all_of(intersect(names(.), names(gpt_4o)))) %>%
+  mutate(comment = NA_character_) %>%
+  mutate(Entity = fct_recode(Entity,
+                    "Annotator_4" = "FD"))
+
+total <- bind_rows(
+  gpt_4o,
+  gpt_4.1,
+  gemini,
+  o3,
+  o4_mini,
+  Annotator1,
+  Annotator2,
+  Annotator3,
+  Annotator4
+  # add as many as you like here…
+)
+
+total$DxExAxPC <- paste(total$land_management_practice, total$effect, total$actor, total$property, total$contrasting_land_management_practice,  total$location_country, total$study_type, sep = "_")
+total$DxExAxPC <- as.factor(total$DxExAxPC)
+
+# Define desired legend order
+entity_levels <- c("Annotator_1", "Annotator_2", "Annotator_3", "Annotator_4", "gpt_4o", "gpt_4.1", "gemini", "o3", "o4_mini")
+```
+
+# .........................................................................................................
+# (A) Objective quantitative analysis
+**Part A** was subdivided into **sections A.1** and **A.2**. Section **A.1** focused on the objective evaluation of extracted patterns (their frequency, variability and consistency across abstracts and annotators). **Section A.2** evaluated the key extraction elements (entities and attributes such as agronomic practice, biological actor, measured effect, actor property and contrast), quantifying categorical diversity, completeness and extraction similarity with human annotators extractions.
+
+## (A.1) - Patterns evaluation
+In this section we did a comparison of the number of **extraction patterns** extracted by human and LLM, overall and by abstract
+
+## plot (Figure x)
+```{r}
+doi_entity_counts <- total %>%
+  dplyr::count(DOI, Entity, name = "count")
+
+# Ensure DOI and Entity are factors with specified levels
+doi_entity_counts <- doi_entity_counts %>%
+  mutate(
+    DOI = factor(DOI, levels = unique(DOI)),
+    Entity = factor(Entity, levels = entity_levels)
+  )
+
+# Compute mean and SD per Entity
+summary_df <- doi_entity_counts %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_count = mean(count, na.rm = TRUE),
+    sd_count   = sd(count,   na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # (optional) preserve a specific order
+  mutate(Entity = factor(Entity, levels = unique(Entity)))
+```
+```{r}
+# Plot with bars + error bars
+pattern_overal_plot <- ggplot(summary_df, aes(x = Entity, y = mean_count)) +
+  geom_col(width = 0.7) +
+  geom_errorbar(aes(
+    ymin = mean_count - sd_count,
+    ymax = mean_count + sd_count
+  ), width = 0.2) +
+  geom_point(aes(y = mean_count), size = 3, color = "white") +
+  theme_bw() +
+  geom_col(fill = "steelblue", width = 0.7) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.major.x = element_blank()
+  ) +
+  labs(
+    x = "Entity",
+    y = "Mean number of patterns",
+    title = "Patterns evaluation"
+  )
+pattern_overal_plot
+```
+
+```{r}
+# Darken brewer palettes by 25%
+# Greens for the Annotators
+Annotator_cols <- colorspace::darken(brewer.pal(4, "Greens"), amount = 0.25)
+names(Annotator_cols) <- paste0("Annotator_", 1:4)
+
+gpt4o_col <- c(gpt_4o = "#E41A1C")
+# Blues for the LLMs
+other_blues <- colorspace::darken(brewer.pal(4, "Blues"), amount = 0.25)
+names(other_blues) <- c("gpt_4.1", "gemini", "o3", "o4_mini")
+
+# Combine into one named vector
+colour_map <- c(Annotator_cols, gpt4o_col, other_blues)
+
+pattern_per_abstract_plot<- ggplot(doi_entity_counts, aes(x = DOI, y = count, group = Entity, color = Entity)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = colour_map) +
+  scale_x_discrete(expand = expansion(add = c(0.1, 0.1))) +  # reduce axis padding
+  labs(
+    x = "DOI",
+    y = "Number of patterns",
+    color = "Entity",
+    title = "Patterns evaluation"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 4),   # smaller labels
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),          # tighten margins
+    plot.title = element_text(hjust = 0.5)
+  )
+pattern_per_abstract_plot
+
+
+```
+## combine plot
+```{r}
+# Combine plots side by side with tags
+
+combined_plot <- plot_grid(pattern_overal_plot, pattern_per_abstract_plot,
+                           labels = c("A", "B"),
+                           label_size = 14,
+                           label_fontface = "bold",
+                           label_x = 0, label_y = 1,
+                           ncol = 2,
+                           align = "h")
+
+# Display the combined plot
+print(combined_plot)
+
+ggsave(
+  filename = file.path(folder_path_plots, "Figure_xxx1.png"),
+  plot     = combined_plot,
+  width    = 12,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+
+```
+
+## resume
+```{r}
+dispersion_by_doi <- doi_entity_counts %>%
+  group_by(Entity) %>%
+  summarise(
+    range     = diff(range(count, na.rm = TRUE)),
+    variance  = var(count, na.rm = TRUE),
+    sd        = sd(count, na.rm = TRUE),
+    cv        = sd(count, na.rm = TRUE) / mean(count, na.rm = TRUE),
+    iqr       = IQR(count, na.rm = TRUE), # Interquartile Range (IQR)
+    mad       = mad(count, na.rm = TRUE), # Median Absolute Deviation (MAD)
+    .groups   = "drop"
+  )
+dispersion_by_doi
+
+```
+
+## (A.2) - Patterns evaluation
+In this section we did a comparison of the number of **different levels** of each key extraction element in human annotators and LLMs extractions
+
+## plots per land_management_practice
+```{r}
+# Compute the number of distinct land_management_practices per DOI × Entity,
+#    then summarise to get mean and sd per Entity
+summary_df <- total %>%
+  group_by(DOI, Entity) %>%
+  summarise(num_land_management_practices = n_distinct(land_management_practice), .groups = "drop") %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_land_management_practices = mean(num_land_management_practices, na.rm = TRUE),
+    sd_land_management_practices   = sd(num_land_management_practices,   na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # ensure the plotting order matches your levels
+  mutate(Entity = factor(Entity, levels = entity_levels))
+
+# Plot: bar chart of means ± SD error bars
+plot1 <- ggplot(summary_df, aes(x = Entity, y = mean_land_management_practices)) +
+  geom_col(fill = "steelblue", width = 0.7) +
+  geom_errorbar(aes(
+    ymin = mean_land_management_practices - sd_land_management_practices,
+    ymax = mean_land_management_practices + sd_land_management_practices
+  ), width = 0.2) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    x = "Entity",
+    y = "Mean number of levels",
+    title = "Land_management_practice"
+  )
+
+plot1
+# Count distinct land_management_practices per DOI × Entity
+df_counts <- total %>%
+  group_by(DOI, Entity) %>%
+  summarize(num_land_management_practices = n_distinct(land_management_practice), .groups = "drop")
+df_counts
+
+df_counts_summary_land_management_practice <- df_counts %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_num_land_management_practices = mean(num_land_management_practices, na.rm = TRUE),
+    .groups    = "drop"
+  )
+df_counts_summary_land_management_practice
+
+# plot one line per Entity over DOI
+plot2 <- ggplot(df_counts, aes(x = DOI, y = num_land_management_practices, group = Entity, color = Entity)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = colour_map) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 4),
+    legend.position = "right"
+  ) +
+  labs(
+    x = "DOI",
+    y = "Number of levels",
+    title = "Land_management_practice"
+  )
+
+plot2
+
+df_detail <- total %>%
+  count(DOI, Entity, land_management_practice, name = "count")
+
+# Inspect
+df_detail
+
+# Combine plots side by side with tags
+
+combined_plot <- plot_grid(plot1, plot2,
+                           labels = c("A", "B"),
+                           label_size = 14,
+                           label_fontface = "bold",
+                           label_x = 0, label_y = 1,
+                           ncol = 2,
+                           align = "h")
+
+# Display the combined plot
+print(combined_plot)
+```
+```{r}
+ggsave(
+  filename = file.path(folder_path_plots, "Figure_xxx_practice.png"),
+  plot     = combined_plot,
+  width    = 12,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+
+## plots per effect
+```{r}
+# Compute the number of distinct actors per DOI × Entity,
+#    then summarise to get mean and sd per Entity
+summary_df <- total %>%
+  group_by(DOI, Entity) %>%
+  summarise(num_effects = n_distinct(effect), .groups = "drop") %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_effects = mean(num_effects, na.rm = TRUE),
+    sd_effects   = sd(num_effects,   na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # ensure the plotting order matches your levels
+  mutate(Entity = factor(Entity, levels = entity_levels))
+
+# Plot: bar chart of means ± SD error bars
+plot1 <- ggplot(summary_df, aes(x = Entity, y = mean_effects)) +
+  geom_col(fill = "steelblue", width = 0.7) +
+  geom_errorbar(aes(
+    ymin = mean_effects - sd_effects,
+    ymax = mean_effects + sd_effects
+  ), width = 0.2) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    x = "Entity",
+    y = "Mean number of levels",
+    title = "Effect"
+  )
+
+
+# Count distinct effects per DOI × Entity
+df_counts <- total %>%
+  group_by(DOI, Entity) %>%
+  summarize(num_effects = n_distinct(effect), .groups = "drop")
+df_counts
+
+df_counts_summary_effect <- df_counts %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_num_effects = mean(num_effects, na.rm = TRUE),
+    .groups    = "drop"
+  )
+df_counts_summary_effect
+
+# plot one line per Entity over DOI
+plot2 <- ggplot(df_counts, aes(x = DOI, y = num_effects, group = Entity, color = Entity)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = colour_map) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 4),
+    legend.position = "right"
+  ) +
+  labs(
+    x = "DOI",
+    y = "Number of levels",
+    title = "Effect"
+  )
+
+df_detail <- total %>%
+  count(DOI, Entity, effect, name = "count")
+
+# Inspect
+df_detail
+
+# Combine plots side by side with tags
+
+combined_plot <- plot_grid(plot1, plot2,
+                           labels = c("A", "B"),
+                           label_size = 14,
+                           label_fontface = "bold",
+                           label_x = 0, label_y = 1,
+                           ncol = 2,
+                           align = "h")
+
+# Display the combined plot
+print(combined_plot)
+```
+```{r}
+ggsave(
+  filename = file.path(folder_path_plots, "Figure_xxx_effect.png"),
+  plot     = combined_plot,
+  width    = 12,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+## plots per actor
+```{r}
+# Compute the number of distinct actors per DOI × Entity,
+#    then summarise to get mean and sd per Entity
+summary_df <- total %>%
+  group_by(DOI, Entity) %>%
+  summarise(num_actors = n_distinct(actor), .groups = "drop") %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_actors = mean(num_actors, na.rm = TRUE),
+    sd_actors   = sd(num_actors,   na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # ensure the plotting order matches your levels
+  mutate(Entity = factor(Entity, levels = entity_levels))
+
+# lot: bar chart of means ± SD error bars
+plot1 <- ggplot(summary_df, aes(x = Entity, y = mean_actors)) +
+  geom_col(fill = "steelblue", width = 0.7) +
+  geom_errorbar(aes(
+    ymin = mean_actors - sd_actors,
+    ymax = mean_actors + sd_actors
+  ), width = 0.2) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    x = "Entity",
+    y = "Mean number of levels",
+    title = "Actor"
+  )
+
+
+# Count distinct actors per DOI × Entity
+df_counts <- total %>%
+  group_by(DOI, Entity) %>%
+  summarize(num_actors = n_distinct(actor), .groups = "drop")
+df_counts
+
+df_counts_summary_actor <- df_counts %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_num_actors = mean(num_actors, na.rm = TRUE),
+    .groups    = "drop"
+  )
+df_counts_summary_actor
+
+# plot one line per Entity over DOI
+plot2 <- ggplot(df_counts, aes(x = DOI, y = num_actors, group = Entity, color = Entity)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = colour_map) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 4),
+    legend.position = "right"
+  ) +
+  labs(
+    x = "DOI",
+    y = "Number of levels",
+    title = "Actor"
+  )
+
+df_detail <- total %>%
+  count(DOI, Entity, actor, name = "count")
+
+# Inspect
+df_detail
+
+# Combine plots side by side with tags
+
+combined_plot <- plot_grid(plot1, plot2,
+                           labels = c("A", "B"),
+                           label_size = 14,
+                           label_fontface = "bold",
+                           label_x = 0, label_y = 1,
+                           ncol = 2,
+                           align = "h")
+
+# Display the combined plot
+print(combined_plot)
+```
+```{r}
+ggsave(
+  filename = file.path(folder_path_plots, "Figure_xxx_actor.png"),
+  plot     = combined_plot,
+  width    = 12,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+## plots per property
+```{r}
+# Compute the number of distinct propertys per DOI × Entity,
+#    then summarise to get mean and sd per Entity
+summary_df <- total %>%
+  group_by(DOI, Entity) %>%
+  summarise(num_propertys = n_distinct(property), .groups = "drop") %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_propertys = mean(num_propertys, na.rm = TRUE),
+    sd_propertys   = sd(num_propertys,   na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # ensure the plotting order matches your levels
+  mutate(Entity = factor(Entity, levels = entity_levels))
+
+# Plot: bar chart of means ± SD error bars
+plot1 <- ggplot(summary_df, aes(x = Entity, y = mean_propertys)) +
+  geom_col(fill = "steelblue", width = 0.7) +
+  geom_errorbar(aes(
+    ymin = mean_propertys - sd_propertys,
+    ymax = mean_propertys + sd_propertys
+  ), width = 0.2) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    x = "Entity",
+    y = "Mean number of levels",
+    title = "Property"
+  )
+
+
+# Count distinct propertys per DOI × Entity
+df_counts <- total %>%
+  group_by(DOI, Entity) %>%
+  summarize(num_properties = n_distinct(property), .groups = "drop")
+df_counts
+
+df_counts_summary_property <- df_counts %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_num_properties = mean(num_properties, na.rm = TRUE),
+    .groups    = "drop"
+  )
+df_counts_summary_property
+
+# plot one line per Entity over DOI
+plot2 <- ggplot(df_counts, aes(x = DOI, y = num_properties, group = Entity, color = Entity)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = colour_map) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 4),
+    legend.position = "right"
+  ) +
+  labs(
+    x = "DOI",
+    y = "Number of levels",
+    title = "Property"
+  )
+
+df_detail <- total %>%
+  count(DOI, Entity, property, name = "count")
+
+# Inspect
+df_detail
+
+# Combine plots side by side with tags
+
+combined_plot <- plot_grid(plot1, plot2,
+                           labels = c("A", "B"),
+                           label_size = 14,
+                           label_fontface = "bold",
+                           label_x = 0, label_y = 1,
+                           ncol = 2,
+                           align = "h")
+
+# Display the combined plot
+print(combined_plot)
+```
+```{r}
+ggsave(
+  filename = file.path(folder_path_plots, "Figure_xxx_property.png"),
+  plot     = combined_plot,
+  width    = 12,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+## plots per contrasting_land_management_practice
+```{r}
+# Compute the number of distinct contrasting_land_management_practices per DOI × Entity,
+#    then summarise to get mean and sd per Entity
+summary_df <- total %>%
+  group_by(DOI, Entity) %>%
+  summarise(num_contrasting_land_management_practices = n_distinct(contrasting_land_management_practice), .groups = "drop") %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_contrasting_land_management_practices = mean(num_contrasting_land_management_practices, na.rm = TRUE),
+    sd_contrasting_land_management_practices   = sd(num_contrasting_land_management_practices,   na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # ensure the plotting order matches your levels
+  mutate(Entity = factor(Entity, levels = entity_levels))
+
+# Plot: bar chart of means ± SD error bars
+plot1 <- ggplot(summary_df, aes(x = Entity, y = mean_contrasting_land_management_practices)) +
+  geom_col(fill = "steelblue", width = 0.7) +
+  geom_errorbar(aes(
+    ymin = mean_contrasting_land_management_practices - sd_contrasting_land_management_practices,
+    ymax = mean_contrasting_land_management_practices + sd_contrasting_land_management_practices
+  ), width = 0.2) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(
+    x = "Entity",
+    y = "Mean number of levels",
+    title = "Contrasting_land_management_practice"
+  )
+
+
+# Count distinct contrasting_land_management_practices per DOI × Entity
+df_counts <- total %>%
+  group_by(DOI, Entity) %>%
+  summarize(num_contrasting_land_management_practices = n_distinct(contrasting_land_management_practice), .groups = "drop")
+df_counts
+
+df_counts_summary_contrasting_land_management_practice <- df_counts %>%
+  group_by(Entity) %>%
+  summarise(
+    mean_num_land_contrasting_management_practices = mean(num_contrasting_land_management_practices, na.rm = TRUE),
+    .groups    = "drop"
+  )
+df_counts_summary_contrasting_land_management_practice
+
+# plot one line per Entity over DOI
+plot2 <- ggplot(df_counts, aes(x = DOI, y = num_contrasting_land_management_practices, group = Entity, color = Entity)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = colour_map) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 4),
+    legend.position = "right"
+  ) +
+  labs(
+    x = "DOI",
+    y = "Number of levels",
+    title = "Contrasting_land_management_practice"
+  )
+
+df_detail <- total %>%
+  count(DOI, Entity, contrasting_land_management_practice, name = "count")
+
+# Inspect
+df_detail
+
+na_counts <- df_detail %>%
+  group_by(Entity) %>%
+  summarise(
+    missing_contrast_practices = sum(is.na(contrasting_land_management_practice)),
+    .groups = "drop"
+  )
+
+na_counts
+
+# Combine plots side by side with tags
+
+combined_plot <- plot_grid(plot1, plot2,
+                           labels = c("A", "B"),
+                           label_size = 14,
+                           label_fontface = "bold",
+                           label_x = 0, label_y = 1,
+                           ncol = 2,
+                           align = "h")
+
+# Display the combined plot
+print(combined_plot)
+```
+```{r}
+ggsave(
+  filename = file.path(folder_path_plots, "Figure_xxx_contrast.png"),
+  plot     = combined_plot,
+  width    = 12,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+
+## plot all 
+
+```{r}
+combined_summary <- df_counts_summary_land_management_practice %>%
+  inner_join(df_counts_summary_effect,                           by = "Entity") %>%
+  inner_join(df_counts_summary_actor,                           by = "Entity") %>%
+  inner_join(df_counts_summary_property,                        by = "Entity") %>%
+  inner_join(df_counts_summary_contrasting_land_management_practice, by = "Entity")
+combined_summary
+
+# 1) Pivot longer so each measure becomes a row
+plot_df <- combined_summary %>%
+  pivot_longer(
+    cols      = -Entity,
+    names_to  = "measure",
+    values_to = "count"
+  ) %>%
+  # ensure Entity is a factor in the desired order:
+  mutate(Entity = factor(Entity, levels = unique(Entity)))
+
+# 2) Plot: one line per measure, x = Entity
+plot1 <- ggplot(plot_df, aes(x = Entity, y = count, group = measure, color = measure)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.title = element_blank()
+  ) +
+  labs(
+    x     = "Entity",
+    y     = "Mean number of levels",
+    title = ""
+  )
+plot1
+```
+
+```{r}
+ggsave(
+  filename = file.path(folder_path_plots, "Figure_xxx_mean levels.png"),
+  plot     = plot1,
+  width    = 12,      # adjust as needed
+  height   = 5,      # adjust as needed
+  dpi      = 300     # publication quality
+)
+```
+
+# .......................................................................................................
+# (B) LLM-based subjective evaluation
+In this section, we employed a LLM to evaluate the similarity between the extractions produced by various the various models and those generated by the four human annotators. This comparison aimed to assess the alignment and consistency between automated and human-generated outputs.
+
+# change R environment
+```{r}
+usethis::edit_r_environ(scope = "project")
+.rs.restartR()
+```
+
+## Prepare DOI subset - loop
+```{r}
+for (i in 1:40) {
+  # Subset and format the dataframe for the current DOI
+  total_DOI <- total %>%
+    mutate(across(everything(), as.factor)) %>%
+    filter(DOI == levels(DOI)[i]) %>%
+    select(DOI, Entity, DxExAxPC)
+  
+  # Convert to CSV text
+  csv_text <- paste0(capture.output(write.csv(total_DOI, row.names = FALSE)), collapse = "\n")
+  
+  # Assign to a uniquely named variable (e.g., csv_text3, csv_text4, ...)
+  assign(paste0("csv_text", i), csv_text)
+}
+```
+
+## Create a new folder_path
+```{r}
+#create a directory named "alfa_diversity" in the current working directory:
+folder_path <- "LLM_reports/"
+  if (!dir.exists(folder_path)) {
+    dir.create(folder_path)
+    cat("Folder created successfully!\n")
+  } else {
+    cat("Folder already exists!\n")
+  }
+```
+
+## Intro LLM
+
+```{r}
+client_Gemini <- chat_google_gemini(
+  system_prompt = "I am a soil scientist using LLM to do structured data mining on scientiic abstracts. My goal is to extract patterns of agronomic managment practices influence on soil biological actors. For each pattern I am also looking for specific contrasts and the direction of the effect of the biological property afected",
+  base_url = "https://generativelanguage.googleapis.com/v1beta/",
+  api_key = NULL,
+  model = "gemini-2.0-flash",
+  params = NULL,
+  api_args = list(),
+  echo = NULL
+)
+```
+
+## LLM conversation
+
+```{r}
+response_gemini_0 <- client_Gemini$chat("I have already used LLMs to extract the data. I used several LLM models and now I need to evaluate which model is more similar to extractionsdone by humans, considering that human extractions are also variable between humans - called Annotators for this purpose.I have 2 options to assess the results of LLM extractions: 1 - I can use R code and build a script to have several objective metrics. 2 - ask you for your subjective opinion. For now I am going to use exclusivelly option 2. Let's go?")
+
+writeLines(response_gemini_0, file.path(folder_path, "response_genini_0.txt"))
+
+response_chat_1 <- client_Gemini$chat("You will analyse which of the LLM models is more similar to Annotators(1 to 4). The input is a dataframe with the resume of the effect of agricultural practices on soil biological actors and results from data mining of abstracts. It has only 3 columns, the \"DOI\" column of the corresponding abstract, the \"Entity\" column with diferent LLM models and humans as Annotators and \"AxExAxPC\" column, with the resume of the extraction as a string-Agricultural practice_Effect_biological actor_property_contrast. Remember it’s extraction results, and I am looking for similarity between human VS LLM extractions, not quality of extraction, that will be evaluated in a diffrenet task, for now is just similarity with human extractions which are the gold standard here. Do your qualitative assessment. The ideal extraction should be the most similar to Annotators. When Annotators disagree try to use some type of mean extraction between them. And yes, this inherent variability should be considered when evaluating the LLMs.  Can i proceed with the task?"
+)
+writeLines(response_chat_1, file.path(folder_path, "response_genini_1.txt"))
+
+response_genini_2 <- client_Gemini$chat("Since i am using an API and R code I am now going to run a loop with 40 abstracts-1 to 40- and you will analyse them. Wait for my next prompt"
+)
+writeLines(response_genini_2, file.path(folder_path, "response_genini_2.txt"))
+
+csv_texts <- lapply(1:40, function(i) get(paste0("csv_text", i)))
+
+# Loop through each abstract
+for (i in seq_along(csv_texts)) {
+  response <- client_Gemini$chat(
+    paste0(
+      "Here is the dataframe of my ", i, "th DOI\n\n",
+      csv_texts[[i]], "\n\n",
+      "Do your qualitative assessment."
+    )
+  )
+  
+  # Save each response to a uniquely named file
+  writeLines(response, file.path(folder_path, paste0("report_gemini_", i, ".txt")))
+}
+
+```
+
+## Final report
+
+```{r}
+# Define the folder path
+folder_path2 <- "G:/My Drive/Bioinformatics/Metanalise Luís Benchmarks/Meta-analysis stage II/22th_round_new_extractions/Gemini/reports"
+
+# Loop to read each file and assign to text1, text2, ..., text39
+for (i in 1:40) {
+  file_path <- file.path(folder_path2, paste0("report_gemini_", i, ".txt"))
+  text_content <- paste(readLines(file_path, warn = FALSE), collapse = "\n")
+  assign(paste0("text", i), text_content)
+}
+
+
+# Initialize prompt header
+combined_prompt <- "Here are the 40 reports to analyze:\n\n"
+
+# Append reports 1 to 4
+for (i in 1:40) {
+  combined_prompt <- paste0(
+    combined_prompt,
+    "=== Report ", i, " ===\n",
+    get(paste0("text", i)), "\n\n"
+  )
+}
+
+# Add final instruction
+final_report_gemini <- client_Gemini$chat(
+  combined_prompt,
+  "Please analyze them and create a report with the conclusion about the model most similar to human extraction. ",
+  "The report should be short, with similar structure to the individual reports."
+)
+
+writeLines(final_report_gemini, file.path(folder_path, "final_report_gemini.txt"))
+```
+
+## token_usage()
+```{r}
+token_usage()
+```
+
+
