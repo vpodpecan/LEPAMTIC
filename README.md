@@ -57,7 +57,7 @@ In most cases the input data is a table exported from WOS or Scopus.
     git clone https://github.com/vpodpecan/LEPAMTIC.git
     ```
 
-#### Running LEPAMTIC
+### Running LEPAMTIC
 
 The complete procedure of knowledge extraction consists of several steps of which the first one is the actual LEPAMTIC pipeline while the rest of the steps are optional but perform important tasks of postprocessing and evaluation.
 
