@@ -1,0 +1,138 @@
+Practices;Contrast
+Biochar;Untreated
+Biochar;Control
+Biochar;No biochar
+Biochar;Unfertilized
+Inorganic fertilizer;Unfertilized
+Mixed fertilizer;Unfertilized
+Organic fertilizer;Unfertilized
+Inorganic fertilizer;Control
+Mixed fertilizer;Control
+Organic fertilizer;Control
+Inorganic fertilizer;Untreated
+Mixed fertilizer;Untreated
+Organic fertilizer;Untreated
+Mixed fertilizer;Organic fertilizer
+Mixed fertilizer;Organic fertilizer
+Inorganic fertilizer;Organic fertilizer
+Inorganic fertilizer;Unfertilized/Inorganic fertilized
+Inorganic fertilized;Mixed fertilizer
+Inorganic fertilizer;Organic fertilizer
+Mixed fertilizer;Unfertilized/Inorganic fertilized
+Retaining crop residues;Control
+Retaining crop residues;Unfertilized
+Retaining crop residues;Untreated
+Retaining crop residues;No retaining crop residues
+Cover cropping;Bare fallow
+Cover cropping;Monoculture
+Cover cropping;Control
+Cover cropping;Untreated
+Crop diversification;Monoculture
+Crop diversification;Control
+Crop diversification;Untreated
+Crop rotation;No crop rotation
+Crop rotation;Monoculture
+Crop rotation;Control
+Crop rotation;Untreated
+Intercropping;Monoculture
+Edge crop;Monoculture
+Intercropping;Control
+Intercropping;Untreated
+Edge crop;Control
+Edge crop;Untreated
+Liming;Untreated
+Liming;No liming
+Liming;Control
+Liming;Unfertilized
+Reduced tillage;Conventional tillage
+Reduced tillage;No tillage
+Conventional tillage;No tillage
+Salinization;No salinization
+Salinization;Control
+Salinization;Untreated
+Grazing;Ungrazed
+Grazing;Control
+Grazing;Untreated
+Cattle rotation;No cattle rotation
+Cattle rotation;Control
+Cattle rotation;Untreated
+Biocides;Untreated
+Biocides;Control
+Biocides;Reduced biocide application
+Bt GMO crop;Non GMO
+Bt GMO crop;Control
+Bt GMO crop;Untreated
+Herbicides;Untreated
+Nematicides;Untreated
+Plastic film mulch;Untreated
+Herbicides;Control
+Nematicides;Control
+Plastic film mulch;Control
+Untreated;Biochar
+Control;Biochar
+No biochar;Biochar
+Unfertilized;Inorganic fertilizer
+Unfertilized;Biochar
+Unfertilized;Mixed fertilizer
+Unfertilized;Organic fertilizer
+Control;Inorganic fertilizer
+Control;Mixed fertilizer
+Control;Organic fertilizer
+Untreated;Inorganic fertilizer
+Untreated;Mixed fertilizer
+Untreated;Organic fertilizer
+Organic fertilizer;Mixed fertilizer
+Organic fertilizer;Mixed fertilizer
+Organic fertilizer;Inorganic fertilizer
+Unfertilized/Inorganic fertilized;Inorganic fertilizer
+Mixed fertilizer;Inorganic fertilized
+Organic fertilizer;Inorganic fertilizer
+Unfertilized/Inorganic fertilized;Mixed fertilizer
+Control;Retaining crop residues
+Untreated;Retaining crop residues
+No retaining crop residues;Retaining crop residues
+Unfertilized;Retaining crop residues
+Bare fallow;Cover cropping
+Monoculture;Cover cropping
+Control;Cover cropping
+Untreated;Cover cropping
+Monoculture;Crop diversification
+Control;Crop diversification
+Untreated;Crop diversification
+No crop rotation;Crop rotation
+Monoculture;Crop rotation
+Control;Crop rotation
+Untreated;Crop rotation
+Monoculture;Intercropping
+Monoculture;Edge crop
+Control;Intercropping
+Untreated;Intercropping
+Control;Edge crop
+Untreated;Edge crop
+Untreated;Liming
+No liming;Liming
+Control;Liming
+Conventional tillage;Reduced tillage
+No tillage;Reduced tillage
+No tillage;Conventional tillage
+No salinization;Salinization
+Control;Salinization
+Untreated;Salinization
+Ungrazed;Grazing
+Control;Grazing
+Untreated;Grazing
+No cattle rotation;Cattle rotation
+Control;Cattle rotation
+Untreated;Cattle rotation
+Untreated;Biocides
+Control;Biocides
+Reduced biocide application;Biocides
+Non GMO;Bt GMO crop
+Control;Bt GMO crop
+Untreated;Bt GMO crop
+Untreated;Herbicides
+Untreated;Nematicides
+Untreated;Plastic film mulch
+Control;Herbicides
+Control;Nematicides
+Control;Plastic film mulch

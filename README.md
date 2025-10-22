@@ -8,7 +8,7 @@ It extracts specific patterns about the effects of land management practices on 
 The prompts are currently tailored to two focal gaps: **biochar** and **retaining crop residues** versus **soil fauna**, but can be easily modified to other combinations of land management practices and soil biota.
 
 
-The name comes from the type of the pattern it extracts:
+The name comes from the type of pattern it extracts:
 
 **L**: Land management practice (e.g., conventional tillage)  
 **E**: Effect (e.g., increase, decrease, no effect)  
@@ -59,9 +59,8 @@ In most cases the input data is a table exported from WOS or Scopus.
 
 ### Running LEPAMTIC
 
-The complete procedure of knowledge extraction consists of several steps of which the first one is the actual LEPAMTIC pipeline while the rest of the steps are optional but perform important tasks of postprocessing and evaluation.
 
-1. Running the LEPAMTIC extractor using GPT-4o model and sample data:
+1. Running the LEPAMTIC extractor using the GPT-4o model and sample data:
 
     ```bash
     python3 extractor.py extract --model_name gpt-4o --scoring_model_name o3 --actor_file data/LLM_actors_list_V2.csv --input_file data/sample.xlsx --output_dir results --openai_keyfile api_keys/openai_api_key --primary_key "UT (Unique ID)" --abstract_column "Abstract"
@@ -71,12 +70,14 @@ The complete procedure of knowledge extraction consists of several steps of whic
 
 
 2. Postprocessing (optional):
-    
+
+   This step is optional. The authors used it when preparing the results for publication.
    The scripts for this step are located in folder `postprocessing`. The goal is to transform the result of the LEPAMTIC pipeline (extraction table) into an analysis-ready harmonized extraction table. A script to generate the final extraction table and data synthesis and visualization is also provided.
 
 
 5. Evaluation (optional): 
    
+   This step is optional. The authors used it when preparing the results for publication.
    The scripts for this step are located in folder `evaluation`. The goal is the evaluation of the performance of the LEPAMTIC prompt chain in both extraction and unification stages, using expert extractions and annotations as the reference.
 
 
