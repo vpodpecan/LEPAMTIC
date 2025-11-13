@@ -26,7 +26,6 @@ def get_LLM(model_name, args):
             raise ValueError(f'{model_name} needs the "--openai_keyfile" parameter to be set')
 
         llm = ChatDialog(api_key=open(args.openai_keyfile).read().strip(),
-                        organization='org-ZrgvzvWlbLIRYMeUAOrVk3am',  # this is optional
                         model=model_name,
                         role=role,
                         call_wait_time=1,
