@@ -12,7 +12,7 @@ The prompts are currently tailored to extract structured information on combinat
 
 The prompts can, however, be readily adapted to other combinations of practices and biological groups, as well as to broader ecological and environmental contexts."
 
-<img src="Figure1.png" alt="Modular workflow" width="50%"/>
+<img src="Figure1.png" alt="Modular workflow" width="75%"/>
 
 </br>
 
