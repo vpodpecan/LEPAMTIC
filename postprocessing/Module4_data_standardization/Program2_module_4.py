@@ -1,7 +1,7 @@
 ########################################################################################
 # Script: Filter and Harmonize Rows Based on Multiple Columns                          #
 # Author: Luis Cunha (extended by ChatGPT)                                             #
-# Version: v3.15                                                                       #
+# Version: v3.16                                                                       #
 # Project/Task: BENCHMARKS, Task 2.3                                                   #
 #                                                                                      #
 # Description:                                                                         #
@@ -146,7 +146,7 @@ def harmonize_data(df, contrast_list, orientation_list):
         "actor_unified",
         "contrasting_land_management_practice_unified"
     ]
-    dedup_columns = (["UT"] + default_cols) if "UT" in kept7.columns else default_cols
+    dedup_columns = (["UT (Unique ID)"] + default_cols) if "UT (Unique ID)" in kept7.columns else default_cols
     before = len(kept7)
     kept8 = kept7.drop_duplicates(subset=dedup_columns).copy()
     deduped = before - len(kept8)
@@ -159,12 +159,12 @@ def harmonize_data(df, contrast_list, orientation_list):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Harmonize and filter CSV based on unified categories and valid contrasts.",
-        epilog="Example: python filter_LLMs_output_v3.15.py data.csv --contrast_list list.csv "
+        epilog="Example: python filter_LLMs_output_v3.16.py extraction_table.csv --contrast_list list.csv "
                "--orientation_list orientation.csv -o filtered.csv",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument("input_file", help="Path to the input CSV file.")
-    parser.add_argument("--contrast_list", required=True, help="Path to driver_contrasts_list2.csv")
+    parser.add_argument("--contrast_list", required=True, help="Path to driver_contrasts_list.csv")
     parser.add_argument("--orientation_list", required=True, help="Path to driver_contrasts_orientation.csv")
     parser.add_argument("-o", "--output", default="filtered_output_v3.15.csv", help="Filtered output CSV file name (basename ok).")
 
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     summary_lines.append(f"  Result: {summary['Step6']}")
     summary_lines.append("Step 7: Swap & invert if pair not in orientation list")
     summary_lines.append(f"  Result: {summary['Step7']}")
-    summary_lines.append("Step 8: Remove duplicates based on UT + 5-column combo")
+    summary_lines.append("Step 8: Remove duplicates based on UT (Unique ID) + 5-column combo")
     summary_lines.append(f"  Result: {summary['Step8']}")
     summary_lines.append(f"Final output written to: {final_csv_path}")
 

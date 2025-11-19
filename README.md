@@ -1,11 +1,20 @@
 # LEPAMTIC
 
+
 ## About
 
-LEPAMTIC is a methodology for pattern extraction from scientific abstracts using large language models (LLMs).
-It extracts specific patterns about the effects of land management practices on soil biota.
 
-The prompts are currently tailored to two focal gaps: **biochar** and **retaining crop residues** versus **soil fauna**, but can be easily modified to other combinations of land management practices and soil biota.
+LEPAMTIC is a large language model (LLM)-based modular workflow for pattern extraction from scientific abstracts, built around LLMs operating at the core of the workflow, specifically in Module 2 and Module 3 (see Figure).
+
+The prompts are currently tailored to extract structured information on combinations of land management practices and soil biota identified as key evidence gaps in the metadata analysis by Lori et al. (2025).
+
+> Lori et al. (2025), Response of soil biota to agricultural management practices: A systematic quantitative meta-data-analysis and method selection framework (https://doi.org/10.1016/j.soilbio.2025.109815). 
+
+The prompts can, however, be readily adapted to other combinations of practices and biological groups, as well as to broader ecological and environmental contexts."
+
+<img src="Figure1.png" alt="Modular workflow" width="50%"/>
+
+</br>
 
 
 The name comes from the type of pattern it extracts:
@@ -63,10 +72,14 @@ In most cases the input data is a table exported from WOS or Scopus.
 1. Running the LEPAMTIC extractor using the GPT-4o model and sample data:
 
     ```bash
-    python3 extractor.py extract --model_name gpt-4o --scoring_model_name o3 --actor_file data/LLM_actors_list_V2.csv --input_file data/sample.xlsx --output_dir results --openai_keyfile api_keys/openai_api_key --primary_key "UT (Unique ID)" --abstract_column "Abstract"
+    python3 extractor.py extract --model_name gpt-4o --scoring_model_name o3 --actor_file data/LLM_actors_list.csv --input_file data/sample.xlsx --output_dir results --openai_keyfile api_keys/openai_api_key --primary_key "UT (Unique ID)" --abstract_column "Abstract"
     ```
-    There are two additional modes: `screen` and `score`. `screen` prescreens the input data to find out which abstracts should be considered for the long and costly extraction.
-   `score` scores the abstracts according to LEPAMTIC rules.
+
+    The LEPAMTIC (Python program 1) implements three modes. The `screen` mode (Module 2) performs a preliminary evaluation of the input abstracts, identifying those that should proceed to the longer and more computationally demanding extraction. 
+    
+    The `extractor` mode (Module 3) serves as the central component, executing the core tasks of knowledge extraction and terminology unification in the workflow. It produces a structured extraction table (an Excel/csv file containing all extracted information) that is ready to be used directly as input for Postprocessing Module 4 (optional) or for any other downstream analysis the user may require.
+    
+    The `score` mode provides an assessment of abstracts according to the LEPAMTIC scoring rules, supporting future methodological developments. 
 
 
 2. Postprocessing (optional):

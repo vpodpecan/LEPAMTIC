@@ -1,14 +1,14 @@
 ---
-title: "Script 5 - Gap extraction overview"
+title: "Program 4 - Module 6 Knowledge data analysis and visualization"
 date: "2025-08-09"
 author: "Martina Lori & Ricardo Leitão"
 output:
   html_document: default
   pdata_document: default
 ---
-This document contains the R script for the  **gap extraction overview** of the paper "Large Language Models as Rapid Evidence Synthesis Tools in Soil Ecology". To address the targeted literature gaps, selected abstracts were fed to the LLM for structured knowledge extraction using the developed prompt chain (LEPAMTIC_V6). The model-generated "extraction table" was then processed in a Python script to filter, normalize, and produce a "harmonized extraction table", which was subsequently tailored to the two focal gaps—biochar and retaining crop residues versus soil fauna, produce the "final extraction table", and analyzed to yield the final results of this study.
+This document contains the R script for the  **Program 4 - Module 6 Knowledge data analysis and visualization** of the paper "Large Language Models as Rapid Evidence Synthesis Tools in Soil Ecology". To address the targeted literature gaps, selected abstracts were fed to the LLM for structured knowledge extraction using the developed prompt chain (LEPAMTIC_V6). The model-generated "extraction table" was then processed in a Python script to filter, normalize, and produce a "harmonized extraction table", which was subsequently tailored to the two focal gaps—biochar and retaining crop residues versus soil fauna, produce the "final extraction table", and analyzed to yield the final results of this study.
 
-In **part (A)** we check the “extraction table” and examined it in detail. In **part (B)** we check the “harmonized extraction table”. In **part (C)** We then take the harmonized extraction table and, in a series of structured steps, review each key extraction element to filter NAs, remove redundancies, and tailor the dataset to the study’s focal gaps—biochar and the retention of crop residues versus soil fauna. The final output is the "final extraction table". In **part (D)** we check the "final extraction table", describe the final results from several perspectives and build the final plots
+In this script we check the "final extraction table", describe the final results and build the plots for visualization
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -43,289 +43,6 @@ if (!dir.exists(folder_path_plots)) {
 }
 ```
 # .........................................................................................................
-# (A) Analize LLM Extraction table
-In part (A) we check the “extraction table” and examined it in detail, generating some numbers and plots.
-
-## Load data
-```{r}
-data1 <- read_excel("SI File 7 - LLM extraction table.xlsx", sheet = "Sheet1")
-```
-
-## Check LLM Gap extraction
-```{r}
-# Rows and columns
- cat("Rows:", nrow(data1), "
-")
- cat("Columns:", ncol(data1), "
-")
-
-# Column names
- cat("Column names:
-")
- print(colnames(data1))
-
-# Number of levels (distinct values) per column
- levels_per_col <- data.frame(column = colnames(data1), n_levels = NA_integer_, stringsAsFactors = FALSE)
- i <- 1
- while (i <= ncol(data1)) {
-   levels_per_col$n_levels[i] <- length(unique(data1[[i]]))
-   i <- i + 1
- }
- print(levels_per_col)
-
-# Mean number of rows per level of 'abstracts'
- abs_counts <- table(data1$UT..Unique.ID., useNA = "no")
- cat("Mean rows per abstract:", mean(as.numeric(abs_counts)), "
-")
- 
-data1 %>%
-  summarise(
-    n_rows     = n(),
-    doi_unique = n_distinct(UT..Unique.ID., na.rm = TRUE)  # unique non-NA DOIs
-  )
-
-# rows per level of UT..Unique.ID (keeps an NA row if there are NAs)
-by_id <- data1 %>%
-  count(`UT..Unique.ID.`, name = "rows_per_id")
-
-# summary stats across IDs (excluding NA if present)
-summary_stats <- by_id %>%
-  filter(!is.na(`UT..Unique.ID.`)) %>%
-  summarise(
-    n_levels  = n(),
-    mean_rows = mean(rows_per_id),
-    min_rows  = min(rows_per_id),
-    max_rows  = max(rows_per_id)
-  )
-
-by_id         # table of counts per ID
-summary_stats # mean/min/max across IDs
-```
-
-## Diagnostic plots
-```{r}
-# Line plot: number of rows per abstract (one value per abstract ID)
-abs_counts <- table(data1$UT..Unique.ID., useNA = "no")
-plot(as.numeric(abs_counts),
-     type = "l",
-     xlab = "Abstract (index)",
-     ylab = "Number of patterns",
-     main = "Rows per abstract")
-
-
-# 6) Barplot for 'scores' (0–5 in 0.5 steps, rounded and clamped)
- scores_num <- as.numeric(data1$score)
- scores_half <- round(scores_num * 2) / 2
- scores_half[scores_half < 0] <- 0
- scores_half[scores_half > 5] <- 5
- levels_05 <- seq(0, 5, by = 0.5)
- counts_05 <- table(factor(scores_half, levels = levels_05))
- barplot(counts_05,
-         main = "Scores distribution (0–5, step 0.5)",
-         xlab = "Score",
-         ylab = "Count")
-
-# 7) Scatter plot: mean score per abstract (one point per abstract)
-idx <- !is.na(scores_num)
-mean_by_abs <- tapply(scores_num[idx], data1$UT..Unique.ID.[idx], mean)
-
-plot(x = as.numeric(mean_by_abs),
-     y = seq_along(mean_by_abs),
-     xlab = "Mean score",
-     ylab = "Abstract (index)",
-     main = "Mean score per abstract",
-     pch = 16)
-
- 
- 
-```
-# .........................................................................................................
-
-# (B) Analize LLM Harmonization extraction table
-In part (B) we simply give a quick to check the “harmonized extraction table” before proceeding with downstream analysis. The “harmonized extraction table” is the output of the script 3 "Filter_LLMs_output_v3.15" and is automatically saved in the folder "retained" under the name "output_final5.csv" when ruuning the script.
- 
-## Load data
-```{r}
-#Load the data about variables extracted from meta-analyses
-data2 <- read.csv("SI File 8 - Harmonized extraction table.csv", header = TRUE,sep=',')
-head(data2)
-str(data2)
-```
-
-## Check LLM Gap extraction
-```{r}
-data2 %>%
-  summarise(
-    n_rows     = n(),
-    doi_unique = n_distinct(UT, na.rm = TRUE)  # unique non-NA DOIs
-  )
-
-# --- % of lost rows (relative to original) ---
-n1 <- nrow(data1)
-n2 <- nrow(data2)
-pct_rows_lost <- 100 * (n1 - n2) / n1
-
-# --- % of lost ID levels in `UT` (exclude NA) ---
-ids1 <- data1  %>% distinct(`UT..Unique.ID.`) %>% filter(!is.na(`UT..Unique.ID.`)) %>% pull()
-ids2 <- data2 %>% distinct(`UT`) %>% filter(!is.na(`UT`)) %>% pull()
-
-levels_lost <- setdiff(ids1, ids2)
-pct_levels_lost <- 100 * length(levels_lost) / length(unique(ids1))
-
-# Optional: a small summary tibble
-summary_out <- tibble(
-  rows_original     = n1,
-  rows_new          = n2,
-  rows_lost         = n1 - n2,
-  pct_rows_lost     = pct_rows_lost,
-  levels_original   = length(unique(ids1)),
-  levels_new        = length(unique(ids2)),
-  levels_lost       = length(levels_lost),
-  pct_levels_lost   = pct_levels_lost
-)
-
-summary_out
-```
-# .........................................................................................................
-
-# (C) Tailoring LLM Output to Literature Gaps
-In part (C) we then take the harmonized extraction table and  review each key extraction element to filter errors, adjust prcatice-contrast combinations, and tailor the dataset to the study’s focal gaps, namely biochar and the retention of crop residues versus soil fauna.
-
-## Curate table
-```{r}
-# remove  irrelevant colums
-columns_to_keep <- c("UT", "actor_unified", "property_unified", "effect", "land_management_practice_unified", "contrasting_land_management_practice_unified", "score","location_country", "study_type")
-data <- data2 %>%
-  select(all_of(columns_to_keep)) 
-data <- data %>% mutate(across(everything(), as.factor))
-head(data)
-str(data)
-
-#rename the columns 
-data <- data%>%
-  rename(
-    DOI = UT,
-    Actor = actor_unified,
-    Property = property_unified,
-    Effect = effect,
-    Practice = land_management_practice_unified,
-    Contrast = contrasting_land_management_practice_unified,
-    Score = score
-  )
-head(data)
-str(data)
-
-data %>%
-  summarise(
-    n_rows     = n(),
-    doi_unique = n_distinct(DOI, na.rm = TRUE)  # unique non-NA DOIs
-  )
-
-```
-
-## Filter actor
-```{r}
-levels(data$Actor)        # list levels
-
-## 1) Determine levels to keep (fauna)
-lvls <- if (is.factor(data$Actor)) levels(data$Actor) else sort(unique(data$Actor))
-
-keep_re <- paste(c(
-  "acari", "ants", "coleoptera", "collembola",
-  "earthworms", "enchytraeids", "isopods", "millipedes", "diplura",
-  "nematodes", "insects", "spiders", "protozoa",
-  "soil fauna", "soil macrofauna", "soil mesofauna", "soil microfauna"
-), collapse = "|")
-
-is_fauna_level <- grepl(keep_re, tolower(lvls))
-
-fauna_levels    <- lvls[ is_fauna_level]
-non_fauna_levels<- lvls[!is_fauna_level]
-
-fauna_levels
-non_fauna_levels
-
-data_fauna <- data %>%
-  filter(str_detect(Actor, regex(keep_re, ignore_case = TRUE))) %>%  # keep fauna only
-  mutate(Actor = factor(Actor)) 
-
-data_fauna %>%
-  summarise(
-    n_rows     = n(),
-    doi_unique = n_distinct(DOI, na.rm = TRUE)  # unique non-NA DOIs
-  )
-
-```
-
-## Filter property
-```{r}
-levels(data_fauna$Property)        # list levels
-```
-## Filter effect
-```{r}
-levels(data_fauna$Effect)        # list levels
-```
-## Filter practice for knowledge gaps selected
-```{r}
-levels(data_fauna$Practice)        # list levels
-
-keep <- c("Biochar", "Retaining crop residues")
-
-data_practice <- data_fauna %>%
-  filter(Practice %in% keep) %>%          # keep rows
-  mutate(Practice = droplevels(Practice)) # drop unused levels
-
-data_practice %>%
-  summarise(
-    n_rows     = n(),
-    doi_unique = n_distinct(DOI, na.rm = TRUE)  # unique non-NA DOIs
-  )
-```
-
-## Filter contrast
-```{r}
-data_practice <- data_practice %>%
-  mutate(across(where(is.factor), fct_drop))
-levels(data_practice$Practice)       # list levels
-levels(data_practice$Contrast) 
-practice_contrast_map <- data_practice %>%
-  filter(!is.na(Practice), !is.na(Contrast)) %>%
-  group_by(Practice) %>%
-  summarise(Contrast_levels = paste(sort(unique(Contrast)), collapse = ", "),
-            .groups = "drop")
-
-practice_contrast_map
-
-```
-
-## Check % lost
-```{r}
-# --- % of lost rows (relative to original) ---
-n1 <- nrow(data2)
-n2 <- nrow(data_practice)
-pct_rows_lost <- 100 * (n1 - n2) / n1
-
-# --- % of lost ID levels in `UT` (exclude NA) ---
-ids1 <- data2  %>% distinct(`UT`) %>% filter(!is.na(`UT`)) %>% pull()
-ids2 <- data_practice %>% distinct(`DOI`) %>% filter(!is.na(`DOI`)) %>% pull()
-
-levels_lost <- setdiff(ids1, ids2)
-pct_levels_lost <- 100 * length(levels_lost) / length(unique(ids1))
-
-# Optional: a small summary tibble
-summary_out <- tibble(
-  rows_original     = n1,
-  rows_new          = n2,
-  rows_lost         = n1 - n2,
-  pct_rows_lost     = pct_rows_lost,
-  levels_original   = length(unique(ids1)),
-  levels_new        = length(unique(ids2)),
-  levels_lost       = length(levels_lost),
-  pct_levels_lost   = pct_levels_lost
-)
-
-summary_out
-```
 
 ## Save
 ```{r}
@@ -410,8 +127,12 @@ residues_proto
 ```
 # .........................................................................................................
 
-# (D) Final extraction table 
-In part (D), we first inspect the “final extraction table.” We then present and describe the results with summary plots, culminating in the final figures that show the number of extracted patterns distributed by (i) practice × actor and (ii) practice × property
+Here, we first inspect the “final extraction table.” We then present and describe the results with summary plots, culminating in the final figures that show the number of extracted patterns distributed by (i) practice × actor and (ii) practice × property
+
+## Load data
+```{r}
+data_practice <- read_excel("final_extraction_table.csv", sheet = "Sheet1")
+```
 
 ## Distribution of key elements plot
 ```{r}
